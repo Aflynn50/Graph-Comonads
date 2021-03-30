@@ -21,6 +21,7 @@ import Algebra.Graph.AdjacencyMap.Algorithm
 import GHC.Exts (Constraint)
 import Data.List
 import Data.Maybe
+import Data.Coerce
 import Data.Tree
 import Debug.Trace
 import Category
@@ -63,6 +64,9 @@ class Graph g => GraphExtras g where
 -- one of these two defns
 -- data EF a where EFdata :: Graph [a] => a -> EFdata a
 data EF a where EFdata :: (Graph a) => AdjacencyMap [Vertex a] -> EF a
+
+eftoAdjMap :: Graph a => EF a -> AdjacencyMap [Vertex a]
+eftoAdjMap (EFdata g) = g
 
 deriving instance (Graph a, Ord a, Show a, Ord (Vertex a), Show (Vertex a)) => Show (EF a)    
 
@@ -135,8 +139,10 @@ coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 -- /\ /\  -->
 -- | /      
 -- Z
--- This finds all the vertacies for which all edges they are included in are preserved,
--- then builds a graph of these which includes all vertacies which are not in any edges in a
+-- This finds all the vertacies in A for which all edges they are included in are preserved by f and g in B.
+-- It then builds the subgraph of A, G that only includes these vertacies
+-- Any vertacies not in an edge in A are also included in G despite the fact that a vertex with no edges doesnt mean
+-- anything since we take the type to be the universe, this was done in case we change the representation. 
 getEqualizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
         AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> GraphMorphism c d -> (AdjacencyMap a, GraphMorphism c c)
 getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.overlay (AdjMap.edges keptE) (AdjMap.vertices disjointV), GM Prelude.id)
@@ -149,8 +155,8 @@ getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.overlay (AdjMap.edges keptE) (Adj
 -- apply :: (Graph a, Graph b, GraphExtras a, c ~ Vertex b) => GraphMorphism a b -> a -> AdjacencyMap c
 -- apply (GM gm) g = AdjMap.edges (map (\(x,y) -> (gm x,gm y)) (getEdges g))
 
-checkVmapIsHomo :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Eq b) => AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> Bool
-checkVmapIsHomo g1 g2 (GM gm) = foldr (\e b -> elem e eG2 && b) True eMapped
+checkMorphIsHomo :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Eq b) => AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> Bool
+checkMorphIsHomo g1 g2 (GM gm) = foldr (\e b -> elem e eG2 && b) True eMapped
     where eMapped = map (\(x,y) -> (gm x,gm y)) (edgeList g1)
           eG2     = edgeList g2
 
@@ -331,6 +337,9 @@ split :: Eq a => a -> [a] -> ([a],[a])
 split x xs = f [] xs
     where f xs (y:ys) = if x == y then (reverse (x:xs), x:ys) else f (y:xs) ys
           
+splitAtD :: Int -> [a] -> ([a],[a])
+splitAtD i xs = (\(x,y) -> (x++[head y],y)) $ splitAt i xs
+
 -- Get pos of y in xs
 -- Pre: y is in xs
 index y xs = f xs 0
@@ -375,14 +384,49 @@ chooseb :: Eq a => Int -> [a] -> [b] -> a -> b
 chooseb k lin1 lin2 a
     | length lin1LT < 2^(k-1) = lin2 !! index a lin1
     | length lin1GT < 2^(k-1) = lin2 !! index a lin1
-    | otherwise               = lin2 !! (2^(k-1))
+    | otherwise               = lin2 !! (2^(k-1)) -- proper way to do it would be split
     where (lin1LT,lin1GT) = split a lin1
 
 
 
+strategy2 :: (Graph a, Graph b, GraphExtras a, GraphExtras b, Eq (Vertex a), Eq (Vertex b)) 
+                        => Int -> a -> b -> [Vertex a] -> [Vertex b]
+strategy2 k glin1 glin2 spoil = map (getIso iso) spoil
+    where lin1 = graphToLin glin1
+          lin2 = graphToLin glin2
+          iso  = f2 k lin1 lin2 spoil []
+
+
+-- Plan:
+-- Keep the iso in the argument and pass it around, if somethings already in the iso then we can continue on to the next
+-- spoiler play. If not then for the first two cases we want to zip together the appropriate parts of the list, add them 
+-- to the iso and if the spoiler plays something not in the iso, call f2 on the remaining bit. It may seem strange that there
+-- will be points on recursive calls of f2 that the spoiler can play outside lin1 but in that case it should be in iso.
+f2 :: Eq a => Int -> [a] -> [b] -> [a] -> [(a,b)] -> [(a,b)]
+f2 _ _ _ [] iso = iso
+f2 0 _ _ _  iso = iso
+f2 k lin1 lin2 (a:ps) iso
+    | inIso a iso             = f2 (k-1) lin1 lin2 ps iso
+    | length lin1LT < 2^(k-1) = f2 (k-1) lin1GT lin2GTc1 ps (iso ++ zip lin1LT lin2LTc1)
+    | length lin1GT < 2^(k-1) = f2 (k-1) lin1LT lin2LTc2 ps (iso ++ zip lin1GT lin2GTc2) -- doesnt matter that they're not reversed since they should be same size
+    | otherwise               = lemma (k-1) (lin1LT,lin1GT) (lin2LTc3,lin2LTc3) ps ((a,bc3):iso)
+      where (lin1LT,lin1GT)     = split a lin1
+            (lin2LTc1,lin2GTc1) = splitAtD (index a lin1) lin2
+            (lin2GTc2,lin2LTc2) = both reverse (splitAtD (length lin1 - index a lin1) (reverse lin2))
+            (lin2LTc3,lin2GTc3) = splitAtD (2^(k-1)) lin2 -- check this has 2^k-1 elems
+            bc3                 = lin2 !! (2^(k-1))
+
+lemma :: Eq a => Int -> ([a], [a]) -> ([b], [b]) -> [a] -> [(a, b)] -> [(a, b)]
+lemma k (lin11,lin12) (lin21,lin22) ps iso = f2 k lin11 lin21 p1 iso ++ f2 k lin12 lin22 p2 iso
+    where (p1,p2) = partition (flip elem lin11) ps
+
+both :: (a -> b) -> (a, a) -> (b, b)
+both f (x,y) = (f x, f y)
+
+
 buildMorphEFkAtoB :: (Graph a, Graph b, GraphExtras a, GraphExtras b, Eq (Vertex a), Eq (Vertex b), Ord (Vertex a), Ord a)
                 => Int -> a -> b -> GraphMorphism (EF a) b
-buildMorphEFkAtoB k glin1 glin2 = GM (last Prelude.. strategy k glin1 glin2)
+buildMorphEFkAtoB k glin1 glin2 = GM (last Prelude.. strategy2 k glin1 glin2)
 
 
 -- checkEFkMorph :: (GraphExtras a, Graph a, Graph b, Eq (Vertex b), Eq (Vertex a)) => Int -> a -> b -> b
@@ -408,8 +452,8 @@ lin6 = linToGraph [1..4]
 lin7 = linToGraph [5..8]
 res2 = checkEFkMorph 2 lin6 lin7
 
+res3 = checkMorphIsHomo (eftoAdjMap (graphToEFk 2 lin6)) lin7 (buildMorphEFkAtoB 2 lin6 lin7)
 
-------------------
 
 ------------------ Tree depth experiments  -------------------- 
 
