@@ -402,22 +402,22 @@ strategy2 k glin1 glin2 spoil = map (getIso iso) spoil
 -- spoiler play. If not then for the first two cases we want to zip together the appropriate parts of the list, add them 
 -- to the iso and if the spoiler plays something not in the iso, call f2 on the remaining bit. It may seem strange that there
 -- will be points on recursive calls of f2 that the spoiler can play outside lin1 but in that case it should be in iso.
-f2 :: Eq a => Int -> [a] -> [b] -> [a] -> [(a,b)] -> [(a,b)]
+f2 :: (Eq a, Eq b) => Int -> [a] -> [b] -> [a] -> [(a,b)] -> [(a,b)]
 f2 _ _ _ [] iso = iso
 f2 0 _ _ _  iso = iso
 f2 k lin1 lin2 (a:ps) iso
     | inIso a iso             = f2 (k-1) lin1 lin2 ps iso
     | length lin1LT < 2^(k-1) = f2 (k-1) lin1GT lin2GTc1 ps (iso ++ zip lin1LT lin2LTc1)
     | length lin1GT < 2^(k-1) = f2 (k-1) lin1LT lin2LTc2 ps (iso ++ zip lin1GT lin2GTc2) -- doesnt matter that they're not reversed since they should be same size
-    | otherwise               = lemma (k-1) (lin1LT,lin1GT) (lin2LTc3,lin2LTc3) ps ((a,bc3):iso)
+    | otherwise               = lemma (k-1) (lin1LT,lin1GT) (lin2LTc3,lin2GTc3) ps ((a,bc3):iso)
       where (lin1LT,lin1GT)     = split a lin1
             (lin2LTc1,lin2GTc1) = splitAtD (index a lin1) lin2
             (lin2GTc2,lin2LTc2) = both reverse (splitAtD (length lin1 - index a lin1) (reverse lin2))
             (lin2LTc3,lin2GTc3) = splitAtD (2^(k-1)) lin2 -- check this has 2^k-1 elems
             bc3                 = lin2 !! (2^(k-1))
 
-lemma :: Eq a => Int -> ([a], [a]) -> ([b], [b]) -> [a] -> [(a, b)] -> [(a, b)]
-lemma k (lin11,lin12) (lin21,lin22) ps iso = f2 k lin11 lin21 p1 iso ++ f2 k lin12 lin22 p2 iso
+lemma :: (Eq a, Eq b) => Int -> ([a], [a]) -> ([b], [b]) -> [a] -> [(a, b)] -> [(a, b)]
+lemma k (lin11,lin12) (lin21,lin22) ps iso = nub $ f2 k lin11 lin21 p1 iso ++ f2 k lin12 lin22 p2 iso
     where (p1,p2) = partition (flip elem lin11) ps
 
 both :: (a -> b) -> (a, a) -> (b, b)
@@ -452,7 +452,8 @@ lin6 = linToGraph [1..4]
 lin7 = linToGraph [5..8]
 res2 = checkEFkMorph 2 lin6 lin7
 
-res3 = checkMorphIsHomo (eftoAdjMap (graphToEFk 2 lin6)) lin7 (buildMorphEFkAtoB 2 lin6 lin7)
+res3 = checkMorphIsHomo (eftoAdjMap (graphToEFk 2 lin4)) lin5 (buildMorphEFkAtoB 2 lin4 lin5)
+res4 = checkMorphIsHomo (eftoAdjMap (graphToEFk 4 lin1)) lin2 (buildMorphEFkAtoB 4 lin1 lin2)
 
 
 ------------------ Tree depth experiments  -------------------- 
@@ -481,3 +482,4 @@ gaifmanTDD (Gaifman g)
         where v  = head (vertexList g)
               cc = getCC (Gaifman (removeVertex v g))
 
+deriving instance (Graph a, Ord a, Ord (Vertex a), Show (Vertex a)) => Show (Gaifman a)    
