@@ -14,12 +14,13 @@ module AlgGraphs where
 
 import Algebra.Graph.Class
 import Algebra.Graph.AdjacencyMap as AdjMap
-import Algebra.Graph.NonEmpty.AdjacencyMap (fromNonEmpty, overlay)
+import qualified Algebra.Graph.NonEmpty.AdjacencyMap as NonEmptyAdjMap (fromNonEmpty, overlay, edge, edgeList)
 import Algebra.Graph.AdjacencyMap.Algorithm
 
 
 import GHC.Exts (Constraint)
 import Data.List
+import Data.Maybe
 import Data.Tree
 import Debug.Trace
 import Category
@@ -29,6 +30,16 @@ import Category
 
 -- Invarients:
 --    - Graphs should not have more than one of the same vertex
+
+-- Possible problems
+--    Getting edge map and going back to graph looses vertacies that arnt in edges, this is bad
+--      I should get rid of the whole Graph class stuff, stick with Adj maps only
+--    There are probably issues with taking the universe as the type. I think I'd like to change this.
+--    E.g. that graph morphisms actually go from one family of graphs to another rather than a specific pair
+--    Not sure how if explicit universes would actally improve this. 
+--      I could take the universe as the set of verticies of the graph 
+--    A graph homomorphism should be able to go between graphs with any set of verticies as long as it preserves
+--    the edges with its vertex map
 
 -- class Graph g where
 --     type Vertex g
@@ -117,7 +128,31 @@ instance CBifunctor Coproduct GraphMorphism GraphMorphism GraphMorphism where
           g (Right x) = Right $ gm2 x
 
 coproduct :: (Ord a, Ord b) => AdjacencyMap a -> AdjacencyMap b -> Coproduct (AdjacencyMap a) (AdjacencyMap b)
-coproduct g1 g2 = Coprod $ AdjMap.connect (gmap Left g1) (gmap Right g2)
+coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
+
+-- Gives the equiliser graph and its the equaliser morphism.
+-- G -> A --> B
+-- /\ /\  -->
+-- | /      
+-- Z
+-- This finds all the vertacies for which all edges they are included in are preserved,
+-- then builds a graph of these which includes all vertacies which are not in any edges in a
+getEqualizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
+        AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> GraphMorphism c d -> (AdjacencyMap a, GraphMorphism c c)
+getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.overlay (AdjMap.edges keptE) (AdjMap.vertices disjointV), GM Prelude.id)
+    where vinE      = nub (concatMap (\(x,y) -> [x,y]) (edgeList g1))
+          keptV     = map fst (intersect (map (\x -> (x,gm1 x)) vinE) (map (\x -> (x,gm2 x)) vinE))
+          disjointV = filter (\x -> not (elem x keptV)) (vertexList g1)
+          keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList g1)
+
+
+-- apply :: (Graph a, Graph b, GraphExtras a, c ~ Vertex b) => GraphMorphism a b -> a -> AdjacencyMap c
+-- apply (GM gm) g = AdjMap.edges (map (\(x,y) -> (gm x,gm y)) (getEdges g))
+
+checkVmapIsHomo :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Eq b) => AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> Bool
+checkVmapIsHomo g1 g2 (GM gm) = foldr (\e b -> elem e eG2 && b) True eMapped
+    where eMapped = map (\(x,y) -> (gm x,gm y)) (edgeList g1)
+          eG2     = edgeList g2
 
 ------------------ Example with two equivilent graphs  -------------------- 
 -- With EF comonad I can only prove them equivilent in fragment of logic with quantifier rank k.
@@ -146,18 +181,53 @@ plays k uni = nub $ concatMap permutations (map (uni++) suffixes)
           f i uni = nub $ concat [map ((head uni):) ps|ps <- 
             (map (f (i-1)) ((init Prelude.. tails) uni))]
 
+-- Doesn't behave properly for k > length uni, it only returns lists of length k not all less than
+plays1 :: Eq a => Int -> [a] -> [[a]]
+plays1 k uni
+    | length uni < k = f (k-(length uni)) (permutations uni)
+    | otherwise       = concatMap (lengthksublists uni) [1..k]
+        where f 0 xs = xs
+              f i xs = nub $ concatMap (\x -> concatMap (allinserts x) pf) uni
+                        where pf = (f (i-1) xs)
+
+allinserts x []     = [[x]]
+allinserts x (y:ys) = (x:y:ys) : map (y:) (allinserts x ys)
+
+lengthksublists :: [a] -> Int -> [[a]]
+lengthksublists xs 0 = [[]]
+lengthksublists xs k = concatMap f (elemPairs xs)
+    where f (x,ys) = map (x:) (lengthksublists ys (k-1))
+
+
+elemPairs :: [a] -> [(a, [a])]
+elemPairs []     = []
+elemPairs (x:xs) = (x,xs) : (map (\(y,ys) -> (y,x:ys)) (elemPairs xs))
+
+
+
 --isPlayCompatible :: (GraphExtras a, Eq (Vertex a)) => a -> [Vertex a] -> Bool
 --isPlayCompatible g p = foldr (\x b -> (elem x p) && b) True (getVertices g)
 
 -- Performs the action of the EFk functor
 graphToEFk :: (GraphExtras a, Eq (Vertex a), Ord (Vertex a)) => Int -> a -> EF a
 graphToEFk k g = EFdata $ AdjMap.edges $
-    concatMap (\p -> map (\(a,b) -> (f p a, f p b)) edgesOfg) ps
-    where edgesOfg = getEdges g
-          ps       = plays k (universe g)
-          f (x:xs) y  -- get prefix of play ending in y
-            | x==y      = [x]
-            | otherwise = x:(f xs y)
+    concatMap (\p -> mapMaybe (\e -> f e p) edgesOfg) ps
+    where edgesOfg  = getEdges g
+          ps        = plays1 k (universe g)
+          f (a,b) p = maybePair (getPrefix p a, getPrefix p b)
+                     
+maybePair :: (Maybe a, Maybe b) -> Maybe (a, b)
+maybePair (Just a, Just b) = Just (a,b)
+maybePair _ = Nothing
+
+-- get prefix of play ending in y
+getPrefix :: Eq t => [t] -> t -> Maybe [t]
+getPrefix [] _ = Nothing 
+getPrefix (x:xs) y  
+            | x==y      = Just [x]
+            | otherwise =  f (getPrefix xs y)
+                where f (Just r) = Just (x:r)
+                      f Nothing  = Nothing
 
 -- graphToEFk usually gives a massive graph so this allows a smaller version of it
 graphToLimEFk :: (GraphExtras a, Eq (Vertex a), Ord (Vertex a)) => Int -> Int -> a -> EF a
@@ -205,6 +275,13 @@ graphToLimEFk lim k g = EFdata $ AdjMap.edges $
 --   | otherwise       = [xs]
 
 
+checkValidEFkGraph :: (Eq (Vertex g1), GraphExtras g1, GraphExtras g2, Vertex g2 ~ [Vertex g1]) => Int -> g1 -> g2 -> Bool
+checkValidEFkGraph k g efg = foldr f True (getEdges efg)
+    where gedges      = getEdges g
+          f (xs,ys) b = length xs <= k && length ys <= k
+                        && elem (last xs,last ys) gedges
+                        && (isPrefixOf xs ys || isPrefixOf ys xs)
+                        && b
 
 
 
@@ -221,14 +298,14 @@ g2tog1 = liftMapToEFMorph f
         f 'b' = 2
         f 'c' = 3 
 
-apply :: (Eq b, Ord a, Ord b) => GraphMorphism (EF (AdjacencyMap a)) (AdjacencyMap b) -> (EF (AdjacencyMap a)) -> AdjacencyMap b
-apply (GM gm) (EFdata g)= gmap gm g
+applyEF :: (Eq b, Ord a, Ord b) => GraphMorphism (EF (AdjacencyMap a)) (AdjacencyMap b) -> (EF (AdjacencyMap a)) -> AdjacencyMap b
+applyEF (GM gm) (EFdata g) = gmap gm g
 
 -- Checks that there is a valid homomorphism from EF A -> B and EF B -> A. This is the condition
 -- for equality up to quantifier rank k
 eqUpToQuantRankK :: (Eq b, Ord a, Ord b) => Int -> GraphMorphism (EF (AdjacencyMap a)) (AdjacencyMap b) -> 
     GraphMorphism (EF (AdjacencyMap b)) (AdjacencyMap a) -> AdjacencyMap a -> AdjacencyMap b -> Bool
-eqUpToQuantRankK k h1 h2 g1 g2 = (apply h1 (graphToEFk k g1) == g2) && (apply h2 (graphToEFk k g2) == g1)
+eqUpToQuantRankK k h1 h2 g1 g2 = (applyEF h1 (graphToEFk k g1) == g2) && (applyEF h2 (graphToEFk k g2) == g1)
 
 res1 = eqUpToQuantRankK 4 g1tog2 g2tog1 graph1 graph2
 
@@ -314,7 +391,7 @@ buildMorphEFkAtoB k glin1 glin2 = GM (last Prelude.. strategy k glin1 glin2)
 
 
 checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
-checkEFkMorph k glin1 glin2 = apply (buildMorphEFkAtoB k glin1 glin2) eflin1
+checkEFkMorph k glin1 glin2 = applyEF (buildMorphEFkAtoB k glin1 glin2) eflin1
     where eflin1 = graphToEFk k glin1
 
 
@@ -329,6 +406,10 @@ lin5 = linToGraph [4..12]
 
 lin6 = linToGraph [1..4]
 lin7 = linToGraph [5..8]
+res2 = checkEFkMorph 2 lin6 lin7
+
+
+------------------
 
 ------------------ Tree depth experiments  -------------------- 
 
@@ -340,7 +421,7 @@ getGaifmanGraph g = Gaifman $ AdjMap.edges (nub (concat [[(v1,v2),(v2,v1)] |(v1,
 
 -- Get connected componants of a Gaifman graph
 getCC :: Gaifman (AdjacencyMap a) -> [Gaifman (AdjacencyMap a)]
-getCC (Gaifman g) = map (Gaifman Prelude.. fromNonEmpty) $ vertexList $ scc g
+getCC (Gaifman g) = map (Gaifman Prelude.. NonEmptyAdjMap.fromNonEmpty) $ vertexList $ scc g
 
 -- Tree depth decomposition of the Gaifman graph
 
