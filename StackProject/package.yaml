@@ -24,6 +24,7 @@ dependencies:
 - constrained-categories
 - containers
 - algebraic-graphs
+- graphviz
 library:
   source-dirs: src
 

@@ -1,6 +1,6 @@
 module Main where
 
-import AlgGraphs
+import AlgGraphsExamples
 
 main :: IO ()
 --main = return ()

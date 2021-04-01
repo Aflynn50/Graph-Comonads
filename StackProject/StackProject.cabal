@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 42bf24ac02bb262382d8f2d5907a663071b203606c65141afb47b65fadf13186
+-- hash: 38c5cefd4f3556e5f6eb5443add6177b800b5d531706266c951914e995769308
 
 name:           StackProject
 version:        0.1.0.0
@@ -27,8 +27,10 @@ source-repository head
 
 library
   exposed-modules:
-      AlgGraphs
+      AlgGraphsCat
+      AlgGraphsExamples
       Category
+      DrawGraphs
       EF
       SigmaStructures
   other-modules:
@@ -40,6 +42,7 @@ library
     , base >=4.7 && <5
     , constrained-categories
     , containers
+    , graphviz
   default-language: Haskell2010
 
 executable StackProject-exe
@@ -55,6 +58,7 @@ executable StackProject-exe
     , base >=4.7 && <5
     , constrained-categories
     , containers
+    , graphviz
   default-language: Haskell2010
 
 test-suite StackProject-test
@@ -71,4 +75,5 @@ test-suite StackProject-test
     , base >=4.7 && <5
     , constrained-categories
     , containers
+    , graphviz
   default-language: Haskell2010
