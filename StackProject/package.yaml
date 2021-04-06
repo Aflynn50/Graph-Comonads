@@ -25,6 +25,7 @@ dependencies:
 - containers
 - algebraic-graphs
 - graphviz
+- random
 library:
   source-dirs: src
 

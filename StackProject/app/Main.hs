@@ -1,7 +1,9 @@
 module Main where
-
+import System.Random
 import AlgGraphsExamples
-
+import DrawGraphs
 main :: IO ()
 --main = return ()
-main = (putStr . show) res1
+main = do 
+    g <- getStdGen
+    (putStr . show) res1

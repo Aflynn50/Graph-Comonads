@@ -23,10 +23,13 @@ import Data.List
 import Data.Maybe
 import Data.Coerce
 import Data.Tree
+
+import Data.Set (fromList, Set)
+import System.Random hiding (split)
 import Debug.Trace
 import Category
+import AlgGraphsCat 
 import DrawGraphs
-import AlgGraphsCat
 
 ------------------ Example with two equivilent graphs  -------------------- 
 -- With EF comonad I can only prove them equivilent in fragment of logic with quantifier rank k.
@@ -300,7 +303,22 @@ res6 g = gmap f g
     where gg = gaifmanTDD (getGaifmanGraph g)
           (GM f) = forestToCoalg gg
 
-test1 = linToGraph ["a","b","c","d"]
-test2 = linToGraph ["d","e","f","a"]
-o = AdjMap.overlay test1 test2
-gg = gaifmanTDD (getGaifmanGraph $ o)
+showMerge t1 t2 = printGraphs $ [res6 t1, res6 t2, res6 o]
+    where o = AdjMap.overlay t1 t2
+
+randomGraph :: (RandomGen g) => g -> Int -> AdjacencyMap Int
+randomGraph g n = fromAdjacencySets $ f verts nums
+    where nums :: [Int]
+          nums       = take (n*n) (randomRs (1, 2) g)
+          verts      = [1..n]
+          f [] r     = []
+          f (v:vs) r = (v, fromList [y|(x,y)<- zip rands verts, x==1]) : (f vs newr)
+                where (rands,newr) = splitAt n r
+
+-- Not acctually random
+randomGraphList size num = map (\x -> randomGraph (mkStdGen x) size) [1..num]
+
+test1 = linToGraph [1..4]
+test2 = linToGraph [4,5,6,1]
+o t1 t2 = AdjMap.overlay (linToGraph t1) (linToGraph t2)
+gg o = gaifmanTDD (getGaifmanGraph $ o)

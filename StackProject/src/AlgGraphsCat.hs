@@ -25,7 +25,6 @@ import Data.Coerce
 import Data.Tree
 import Debug.Trace
 import Category
-import DrawGraphs
 
 
 -- EF comonad over graph using algebraic adjaceny map graphs. 
@@ -114,7 +113,7 @@ product :: (Ord a, Ord b) => AdjacencyMap a -> AdjacencyMap b -> Product (Adjace
 product g1 g2 = Prod $ box g1 g2
 
 
-data Coproduct a b where Coprod :: (Graph a, Graph a) => AdjacencyMap (Either (Vertex a) (Vertex b)) -> Coproduct a b
+data Coproduct a b where Coprod :: (Graph a, Graph b) => AdjacencyMap (Either (Vertex a) (Vertex b)) -> Coproduct a b
 
 instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => Graph (Coproduct a b) where
     type Vertex (Coproduct a b) = Either (Vertex a) (Vertex b)
@@ -135,6 +134,7 @@ instance CBifunctor Coproduct GraphMorphism GraphMorphism GraphMorphism where
 coproduct :: (Ord a, Ord b) => AdjacencyMap a -> AdjacencyMap b -> Coproduct (AdjacencyMap a) (AdjacencyMap b)
 coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 
+coprodToAdjmap (Coprod g) = g 
 -- Gives the equiliser graph and its the equaliser morphism.
 -- G -> A --> B
 -- /\ /\  -->
