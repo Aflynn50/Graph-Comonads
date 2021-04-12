@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 5f1a766c8f4fc8337aadc8f6e957d451e483850f68d43c6fdbca8db7baa80e2a
+-- hash: d4a5ab99d143e445d61e4625da2b951fc3bde39682e4207aaaf199e806058f68
 
 name:           StackProject
 version:        0.1.0.0
@@ -42,6 +42,7 @@ library
     , base >=4.7 && <5
     , constrained-categories
     , containers
+    , ghc-typelits-extra
     , graphviz
     , random
   default-language: Haskell2010
@@ -59,6 +60,7 @@ executable StackProject-exe
     , base >=4.7 && <5
     , constrained-categories
     , containers
+    , ghc-typelits-extra
     , graphviz
     , random
   default-language: Haskell2010
@@ -77,6 +79,7 @@ test-suite StackProject-test
     , base >=4.7 && <5
     , constrained-categories
     , containers
+    , ghc-typelits-extra
     , graphviz
     , random
   default-language: Haskell2010

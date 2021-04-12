@@ -26,6 +26,7 @@ dependencies:
 - algebraic-graphs
 - graphviz
 - random
+- ghc-typelits-extra
 library:
   source-dirs: src
 

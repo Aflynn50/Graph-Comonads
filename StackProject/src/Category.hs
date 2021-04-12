@@ -37,7 +37,7 @@ class (Category dom1, Category dom2, Category cod)
 
 class (Category cat) => CComonad f cat where
   counit :: (Object cat a
-    , Object cat (f a)) 
+    , Object cat (f a))
     => cat (f a) a
   extend :: (Object cat a
     , Object cat b
@@ -51,6 +51,14 @@ class (Category cat) => CComonad f cat where
     => cat (f a) (f (f a))
   duplicate = extend Category.id
 
+-- class (Category dom, Category cod) => CFunctor f dom cod where
+--   funcMap :: (Object dom a, Object cod (f a), Object dom b, Object cod (f b)) => dom a b -> cod (f a) (f b)
+
+
+class (Category dom, Category cod, CFunctor l dom cod, CFunctor r cod dom) => Adjunction cod dom l r where
+  eta :: (Object dom a, Object dom (l (r b))) => dom a b
+
+-- Every comonad is automatically a functor
 instance (Category cat, CComonad f cat) => CFunctor f cat cat where
   funcMap f = extend (f . counit)
 
@@ -62,9 +70,9 @@ instance Category (CoKleisli f cat) where
   id = CoKleisli counit
   (CoKleisli f) . (CoKleisli g) = CoKleisli (f . extend g)
 
---instance (Category m, CComonad f m) => CFunctor Identity m (CoKleisli f m) where
---  funcMap f = CoKleisli (f . counit)
-
+-- I dont think giving the eilenberg moore category is possible in Haskell (with this cate defn), the 
+-- objects would have to be functions, not sure how I could enforece this with a constraint. 
+-- ConstraintKinds gives constraints kinds rather than leting kinds be constraints :(
 
 
 -- class Category (k :: κ -> κ -> *) where

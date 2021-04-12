@@ -50,10 +50,6 @@ g2tog1 = liftMapToEFMorph f
         f 'b' = 2
         f 'c' = 3 
 
-
-
-
-
 res1 = eqUpToQuantRankK 4 g1tog2 g2tog1 graph1 graph2
 
 ------------------ Example with linear orderings  --------------------
@@ -69,9 +65,9 @@ count x = foldr (\y xs-> if x==y then xs + 1 else xs) 0
 
 -- converts a graph to a linear order
 -- Pre: Graph is a representation of a lin order
-graphToLin :: (Graph a, GraphExtras a, Eq (Vertex a)) => a -> [Vertex a]
+graphToLin :: (Graph a, GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
 graphToLin g = reverse $ map fst $ sortBy (\(_,a) (_,b) -> compare a b) $ map (\x -> (x,count x e)) (universe g)
-    where e = map fst (getEdges g)
+    where e = map fst (edgeList (gcoerce g))
 
 -- Pre: elem x xs
 split :: Eq a => a -> [a] -> ([a],[a])
@@ -96,9 +92,10 @@ getIso ((a,b):iso) x
 
 -- Given a spoilers play come up with the duplicators 
 -- This uses the strategy given on page 29 of Libkin
+-- This doesnt work, strategy2 does
 -- Pre: length lin1,lin2 >= 2^k
 --      length spoil <= k
-strategy :: (Graph a, Graph b, GraphExtras a, GraphExtras b, Eq (Vertex a), Eq (Vertex b)) 
+strategy :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b)) 
                         => Int -> a -> b -> [Vertex a] -> [Vertex b]
 strategy k glin1 glin2 spoil = map (getIso iso) spoil
     where lin1 = graphToLin glin1
@@ -129,8 +126,8 @@ chooseb k lin1 lin2 a
     where (lin1LT,lin1GT) = split a lin1
 
 
-
-strategy2 :: (Graph a, Graph b, GraphExtras a, GraphExtras b, Eq (Vertex a), Eq (Vertex b)) 
+-- do I need ? 
+strategy2 :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b)) 
                         => Int -> a -> b -> [Vertex a] -> [Vertex b]
 strategy2 k glin1 glin2 spoil = map (getIso iso) spoil
     where lin1 = graphToLin glin1
@@ -165,7 +162,7 @@ both :: (a -> b) -> (a, a) -> (b, b)
 both f (x,y) = (f x, f y)
 
 
-buildMorphEFkAtoB :: (Graph a, Graph b, GraphExtras a, GraphExtras b, Eq (Vertex a), Eq (Vertex b), Ord (Vertex a), Ord a)
+buildMorphEFkAtoB :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b), Ord (Vertex a), Ord a)
                 => Int -> a -> b -> GraphMorphism (EF a) b
 buildMorphEFkAtoB k glin1 glin2 = GM (last Prelude.. strategy2 k glin1 glin2)
 
@@ -176,7 +173,7 @@ buildMorphEFkAtoB k glin1 glin2 = GM (last Prelude.. strategy2 k glin1 glin2)
 
 
 checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
-checkEFkMorph k glin1 glin2 = applyEF (buildMorphEFkAtoB k glin1 glin2) eflin1
+checkEFkMorph k glin1 glin2 = apply (buildMorphEFkAtoB k glin1 glin2) eflin1
     where eflin1 = graphToEFk k glin1
 
 
@@ -193,8 +190,11 @@ lin6 = linToGraph [1..4]
 lin7 = linToGraph [5..8]
 res2 = checkEFkMorph 2 lin6 lin7
 
-res3 = checkMorphIsHomo (eftoAdjMap (graphToEFk 2 lin4)) lin5 (buildMorphEFkAtoB 2 lin4 lin5)
-res4 = checkMorphIsHomo (eftoAdjMap (graphToEFk 4 lin1)) lin2 (buildMorphEFkAtoB 4 lin1 lin2)
+res3 = checkMorphIsHomo (gcoerce (graphToEFk 2 lin4)) lin5 (buildMorphEFkAtoB 2 lin4 lin5)
+res4 = checkMorphIsHomo (gcoerce (graphToEFk 4 lin1)) lin2 (buildMorphEFkAtoB 4 lin1 lin2)
+
+------------------ Two colourability  -------------------- 
+
 
 
 ------------------ Tree depth experiments  -------------------- 
@@ -252,7 +252,7 @@ findNodePreds a t
 -- We also need the domain graph of the coalg to work out which elems of the universe are in edges so we can
 -- apply the coalg to them to get the forest
 coalgToForest :: (Eq a, Ord a) => GraphMorphism (AdjacencyMap a) (EF (AdjacencyMap a)) -> (AdjacencyMap a) -> Forest a
-coalgToForest (GM f) g = foldr addToForest [] (foldr h [] (getVertices g))
+coalgToForest (GM f) g = foldr addToForest [] (foldr h [] (vertexList g))
     where h a l = updateList (f a) l
           updateList as []     = [as]
           updateList as (xs:xss)
@@ -317,6 +317,7 @@ randomGraph g n = fromAdjacencySets $ f verts nums
 
 -- Not acctually random
 randomGraphList size num = map (\x -> randomGraph (mkStdGen x) size) [1..num]
+
 
 test1 = linToGraph [1..4]
 test2 = linToGraph [4,5,6,1]

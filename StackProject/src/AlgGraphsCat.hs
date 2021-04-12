@@ -7,7 +7,16 @@
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE UndecidableInstances   #-}
 {-# LANGUAGE StandaloneDeriving     #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE FlexibleInstances #-}
 
+
+{-# OPTIONS_GHC -fplugin GHC.TypeLits.Extra.Solver #-}
 
 
 module AlgGraphsCat where
@@ -17,12 +26,14 @@ import Algebra.Graph.AdjacencyMap as AdjMap
 import qualified Algebra.Graph.NonEmpty.AdjacencyMap as NonEmptyAdjMap (fromNonEmpty, overlay, edge, edgeList)
 import Algebra.Graph.AdjacencyMap.Algorithm
 
-
+import GHC.TypeLits
+import GHC.TypeLits.Extra
 import GHC.Exts (Constraint)
 import Data.List
 import Data.Maybe
 import Data.Coerce
 import Data.Tree
+import Data.Proxy
 import Debug.Trace
 import Category
 
@@ -37,17 +48,12 @@ import Category
 --      I should get rid of the whole Graph class stuff, stick with Adj maps only
 --    There are probably issues with taking the universe as the type. I think I'd like to change this.
 --    E.g. that graph morphisms actually go from one family of graphs to another rather than a specific pair
---    Not sure how if explicit universes would actally improve this. 
+--    Not sure how if explicit universes would actally improve this - they would dissallow infinite universes
 --      I could take the universe as the set of verticies of the graph 
---    A graph homomorphism should be able to go between graphs with any set of verticies as long as it preserves
---    the edges with its vertex map
-
--- class Graph g where
---     type Vertex g
---     empty :: g
---     vertex :: Vertex g -> g
---     overlay :: g -> g -> g
---     connect :: g -> g -> g
+--      A graph homomorphism should be able to go between graphs with any set of verticies as long as it preserves
+--      the edges with its vertex map
+--    The universe of EF and pebble should both be none empty lists
+-- EF category
 
 data GraphMorphism a b where GM :: (Graph a, Graph b) => (Vertex a -> Vertex b) -> GraphMorphism a b 
 
@@ -56,24 +62,70 @@ instance Category GraphMorphism where
     id          = GM Prelude.id
     GM f . GM g = GM (f Prelude.. g)
 
+-- A tree of depth n or less
+data SmallTree (n :: Nat) a where
+    SmallTree :: (k<=n) => KTree (k :: Nat) a -> SmallTree n a
+
+-- A tree of depth n
+data KTree (n :: Nat) a where
+    KNode :: {
+        kRootLabel :: a,                 -- ^ label value
+        kSubForest :: SubForests (n-1) a -- ^ zero or more child trees
+    } -> KTree (n :: Nat) a
+
+-- A list of trees, n is the maximum of the depths of the trees
+data SubForests (n :: Nat) a where
+    SFNil :: SubForests 0 a
+    SFCons :: KTree m a -> SubForests n a -> SubForests (Max n m) a
+
+-- I somehow want to say f is a family of functions from KTree n a -> b for any n
+sfmap :: (KTree n a -> b) -> (SubForests n a) -> [b] 
+sfmap f SFNil           = []
+sfmap f (SFCons kt kts) = f kt : sfmap f kts
+
+ktfoldr :: (a -> [b] -> b) -> KTree n a -> b 
+ktfoldr f (KNode l st) = f l (sfmap (ktfoldr f) st)
+
+-- Specify n at the type level
+-- Is this possible with a foldTree or do the types get in the way too much?
+-- Also have I got the use of natVal right? I want to get the value from the type.
+treeToSmallTree :: (1<=n, KnownNat n) => Tree a -> Maybe (SmallTree n a)
+treeToSmallTree t = if depth < natVal Proxy then Just (SmallTree (foldTree f t)) else Nothing
+    where depth  = foldTree (\_ xs -> if null xs then 0 else 1 + maximum xs) t
+          f x xs = KNode x (foldr g SFNil xs)
+          g x xs = SFCons x xs
+
+-- Needs to preserve the roots of the trees in the forest
+data ForestMorphism a b where FM :: (Forest a -> Forest b) -> ForestMorphism a b 
+
+class ForestCover f where
+    type FVertex f
+    getForest :: f -> Forest (FVertex f)
+
+instance Category ForestMorphism where
+    type Object ForestMorphism f = ForestCover f
+    id          = FM Prelude.id 
+    FM f . FM g = FM (f Prelude.. g)
+
 -- I think this could probably be better done with coerce
-class Graph g => GraphExtras g where
-    getEdges :: g -> [(Vertex g, Vertex g)]
-    getVertices :: g -> [Vertex g]
-
--- one of these two defns
--- data EF a where EFdata :: Graph [a] => a -> EFdata a
-data EF a where EFdata :: (Graph a) => AdjacencyMap [Vertex a] -> EF a
-
-eftoAdjMap :: Graph a => EF a -> AdjacencyMap [Vertex a]
-eftoAdjMap (EFdata g) = g
+-- Change this to a thing that has a function from g to adjmap and nothing else. 
+class Graph g => GraphCoerce g where
+    gcoerce    :: g -> AdjacencyMap (Vertex g)
+    gcoerceRev :: AdjacencyMap (Vertex g) -> g
 
 deriving instance (Graph a, Ord a, Show a, Ord (Vertex a), Show (Vertex a)) => Show (EF a)    
 
 -- We need the Ord here because the Graph instance for AdjMaps needs it
-instance Ord a => GraphExtras (AdjacencyMap a) where
-    getEdges = edgeList
-    getVertices = vertexList
+instance Ord a => GraphCoerce (AdjacencyMap a) where
+    gcoerce    = Prelude.id
+    gcoerceRev = Prelude.id
+
+------ The Ehrenfeucht-Fraı̈ssé Comonad ------
+-- Should technically be non empty lists rather than just haskell lists
+
+-- one of these two defns
+-- data EF a where EFdata :: Graph [a] => a -> EFdata a
+data EF a where EFdata :: (Graph a) => AdjacencyMap [Vertex a] -> EF a
 
 instance (Graph a, Ord a, Ord (Vertex a)) => Graph (EF a) where
     type Vertex (EF a) = [Vertex a]
@@ -82,16 +134,38 @@ instance (Graph a, Ord a, Ord (Vertex a)) => Graph (EF a) where
     overlay (EFdata g1) (EFdata g2) = EFdata $ AdjMap.overlay g1 g2
     connect (EFdata g1) (EFdata g2) = EFdata $ AdjMap.connect g1 g2
 
-instance (Graph a, Ord a, Ord (Vertex a)) => GraphExtras (EF a) where
-    getEdges (EFdata g) = edgeList g
-    getVertices (EFdata g) = vertexList g
-
-instance CFunctor EF GraphMorphism GraphMorphism where
-     funcMap (GM f) = GM (map f)
+instance (Graph a, Ord a, Ord (Vertex a)) => GraphCoerce (EF a) where
+    gcoerce (EFdata g) = g
+    gcoerceRev g       = EFdata g 
 
 instance CComonad EF GraphMorphism where
     counit          = GM last -- the universe of EF is none empty lists so this is ok
     extend (GM f)   = GM $ map f Prelude.. (tail Prelude.. inits) 
+
+------ The Pebbling Comonad ------
+-- Should technically be non empty lists rather than just haskell lists
+
+
+data Pebble a where Peb :: (Graph a) => AdjacencyMap [(Int, Vertex a)] -> Pebble a
+
+instance (Graph a, Ord a, Ord (Vertex a)) => Graph (Pebble a) where
+    type Vertex (Pebble a) = [(Int,Vertex a)]
+    empty = Peb AdjMap.empty
+    vertex v = Peb $ AdjMap.vertex v
+    overlay (Peb g1) (Peb g2) = Peb $ AdjMap.overlay g1 g2
+    connect (Peb g1) (Peb g2) = Peb $ AdjMap.connect g1 g2
+
+instance (Graph a, Ord a, Ord (Vertex a)) => GraphCoerce (Pebble a) where
+    gcoerce (Peb g) = g
+    gcoerceRev g    = Peb g 
+
+instance CComonad Pebble GraphMorphism where
+    counit          = GM $ snd Prelude.. last -- the universe of Pebbles is none empty lists so this is ok
+    extend (GM f)   = GM $ map (\xs -> (fst (last xs),f xs)) Prelude.. (tail Prelude.. inits)
+
+-- Modal comonad
+
+-- Category functors
 
 data Product a b where Prod :: (Graph a, Graph b) => AdjacencyMap (Vertex a, Vertex b) -> Product a b
 
@@ -102,9 +176,9 @@ instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => Graph (Product a 
     overlay (Prod g1) (Prod g2) = Prod $ AdjMap.overlay g1 g2
     connect (Prod g1) (Prod g2) = Prod $ AdjMap.connect g1 g2
 
-instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => GraphExtras (Product a b) where
-    getEdges (Prod g) = edgeList g
-    getVertices (Prod g) = vertexList g
+instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => GraphCoerce (Product a b) where
+    gcoerce (Prod g) = g
+    gcoerceRev g     = Prod g 
 
 instance CBifunctor Product GraphMorphism GraphMorphism GraphMorphism where
   bifuncMap (GM gm1) (GM gm2) = GM (\(x,y) -> (gm1 x, gm2 y))
@@ -122,9 +196,9 @@ instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => Graph (Coproduct 
     overlay (Coprod g1) (Coprod g2) = Coprod $ AdjMap.overlay g1 g2
     connect (Coprod g1) (Coprod g2) = Coprod $ AdjMap.connect g1 g2
 
-instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => GraphExtras (Coproduct a b) where
-    getEdges (Coprod g) = edgeList g
-    getVertices (Coprod g) = vertexList g
+instance (Graph a, Graph b, Ord (Vertex a), Ord (Vertex b)) => GraphCoerce (Coproduct a b) where
+    gcoerce (Coprod g) = g
+    gcoerceRev g       = Coprod g  
 
 instance CBifunctor Coproduct GraphMorphism GraphMorphism GraphMorphism where
   bifuncMap (GM gm1) (GM gm2) = GM g
@@ -134,7 +208,6 @@ instance CBifunctor Coproduct GraphMorphism GraphMorphism GraphMorphism where
 coproduct :: (Ord a, Ord b) => AdjacencyMap a -> AdjacencyMap b -> Coproduct (AdjacencyMap a) (AdjacencyMap b)
 coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 
-coprodToAdjmap (Coprod g) = g 
 -- Gives the equiliser graph and its the equaliser morphism.
 -- G -> A --> B
 -- /\ /\  -->
@@ -153,8 +226,16 @@ getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.overlay (AdjMap.edges keptE) (Adj
           keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList g1)
 
 
--- apply :: (Graph a, Graph b, GraphExtras a, c ~ Vertex b) => GraphMorphism a b -> a -> AdjacencyMap c
--- apply (GM gm) g = AdjMap.edges (map (\(x,y) -> (gm x,gm y)) (getEdges g))
+-- I should also do the coequaliser
+
+-- getCoequalizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
+--         AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> GraphMorphism c d -> (AdjacencyMap a, GraphMorphism c c)
+-- getCoequalizer g1 g2  
+
+-- Useful functions
+
+apply :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord (Vertex a), Ord (Vertex b)) => GraphMorphism a b -> a -> b
+apply (GM gm) g = gcoerceRev (gmap gm (gcoerce g))
 
 checkMorphIsHomo :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Eq b) => AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> Bool
 checkMorphIsHomo g1 g2 (GM gm) = foldr (\e b -> elem e eG2 && b) True eMapped
@@ -164,8 +245,8 @@ checkMorphIsHomo g1 g2 (GM gm) = foldr (\e b -> elem e eG2 && b) True eMapped
 
 
 -- universe of a graph
-universe :: (GraphExtras a, Eq (Vertex a)) => a -> [Vertex a]
-universe = nub Prelude.. getVertices
+universe :: (GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
+universe = nub Prelude.. vertexList Prelude.. gcoerce
 
 
 -- -- Code to generate all compatible plays with a graph with universe uni.
@@ -209,10 +290,10 @@ elemPairs (x:xs) = (x,xs) : (map (\(y,ys) -> (y,x:ys)) (elemPairs xs))
 --isPlayCompatible g p = foldr (\x b -> (elem x p) && b) True (getVertices g)
 
 -- Performs the action of the EFk functor
-graphToEFk :: (GraphExtras a, Eq (Vertex a), Ord (Vertex a)) => Int -> a -> EF a
+graphToEFk :: (GraphCoerce a, Eq (Vertex a), Ord (Vertex a)) => Int -> a -> EF a
 graphToEFk k g = EFdata $ AdjMap.edges $
     concatMap (\p -> mapMaybe (\e -> f e p) edgesOfg) ps
-    where edgesOfg  = getEdges g
+    where edgesOfg  = edgeList (gcoerce g)
           ps        = plays k (universe g)
           f (a,b) p = maybePair (getPrefix p a, getPrefix p b)
                      
@@ -230,10 +311,10 @@ getPrefix (x:xs) y
                       f Nothing  = Nothing
 
 -- graphToEFk usually gives a massive graph so this allows a smaller version of it
-graphToLimEFk :: (GraphExtras a, Eq (Vertex a), Ord (Vertex a)) => Int -> Int -> a -> EF a
+graphToLimEFk :: (GraphCoerce a, Eq (Vertex a), Ord (Vertex a)) => Int -> Int -> a -> EF a
 graphToLimEFk lim k g = EFdata $ AdjMap.edges $
     concat $ take lim $ map (\p -> map (\(x,y) -> (f p x, f p y)) edgesOfg) ps
-    where edgesOfg = getEdges g
+    where edgesOfg = edgeList (gcoerce g)
           ps       = plays k (universe g)
           f (x:xs) y  -- get prefix of play ending in y
             | x==y      = [x]
@@ -274,24 +355,35 @@ graphToLimEFk lim k g = EFdata $ AdjMap.edges $
 --   | k < (length xs) = (take k xs) : (t k (drop k xs))
 --   | otherwise       = [xs]
 
-checkValidEFkGraph :: (Eq (Vertex g1), GraphExtras g1, GraphExtras g2, Vertex g2 ~ [Vertex g1]) => Int -> g1 -> g2 -> Bool
-checkValidEFkGraph k g efg = foldr f True (getEdges efg)
-    where gedges      = getEdges g
+checkValidEFkGraph :: (Eq (Vertex g1), GraphCoerce g1, GraphCoerce g2, Vertex g2 ~ [Vertex g1]) => Int -> g1 -> g2 -> Bool
+checkValidEFkGraph k g efg = foldr f True (edgeList (gcoerce efg))
+    where gedges      = edgeList (gcoerce g)
           f (xs,ys) b = length xs <= k && length ys <= k
                         && elem (last xs,last ys) gedges
                         && (isPrefixOf xs ys || isPrefixOf ys xs)
                         && b
 
-
+checkValidPebkGraph :: (Eq (Vertex g1), Graph g1, Graph g2, GraphCoerce g1, GraphCoerce g2, Vertex g2 ~ [(Int,Vertex g1)]) => Int -> g1 -> g2 -> Bool
+checkValidPebkGraph k g pebg = foldr f True (edgeList (gcoerce pebg))
+    where gedges      = edgeList (gcoerce g)
+          checkk xs   = foldr (\(x,y) b' -> b' && x <= k) True xs 
+          f (xs,ys) b = checkk xs && checkk ys
+                        && elem (snd (last xs),snd (last ys)) gedges
+                        && g1 xs ys
+                        && b
+          g1 xs ys
+            | isPrefixOf xs ys = h xs ys
+            | isPrefixOf ys xs = h ys xs
+            | otherwise        = False
+                where h xs' ys' = foldr (\(x,_) b' -> (lastx /= x) && b') True (drop (length xs') ys') 
+                        where lastx     = fst (last xs')
 
 liftMapToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> GraphMorphism (EF a) b
 liftMapToEFMorph f = GM f Category.. counit
 
-applyEF :: (Eq b, Ord a, Ord b) => GraphMorphism (EF (AdjacencyMap a)) (AdjacencyMap b) -> (EF (AdjacencyMap a)) -> AdjacencyMap b
-applyEF (GM gm) (EFdata g) = gmap gm g
 
 -- Checks that there is a valid homomorphism from EF A -> B and EF B -> A. This is the condition
 -- for equality up to quantifier rank k
 eqUpToQuantRankK :: (Eq b, Ord a, Ord b) => Int -> GraphMorphism (EF (AdjacencyMap a)) (AdjacencyMap b) -> 
     GraphMorphism (EF (AdjacencyMap b)) (AdjacencyMap a) -> AdjacencyMap a -> AdjacencyMap b -> Bool
-eqUpToQuantRankK k h1 h2 g1 g2 = (applyEF h1 (graphToEFk k g1) == g2) && (applyEF h2 (graphToEFk k g2) == g1)
+eqUpToQuantRankK k h1 h2 g1 g2 = (apply h1 (graphToEFk k g1) == g2) && (apply h2 (graphToEFk k g2) == g1)
