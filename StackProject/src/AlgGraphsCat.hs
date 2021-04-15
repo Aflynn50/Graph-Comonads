@@ -7,13 +7,15 @@
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE UndecidableInstances   #-}
 {-# LANGUAGE StandaloneDeriving     #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE PolyKinds              #-}
+{-# LANGUAGE TypeOperators          #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
+{-# LANGUAGE AllowAmbiguousTypes    #-}
+{-# LANGUAGE InstanceSigs           #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE RankNTypes             #-}
+{-# LANGUAGE KindSignatures #-}
 
 
 {-# OPTIONS_GHC -fplugin GHC.TypeLits.Extra.Solver #-}
@@ -27,7 +29,7 @@ import qualified Algebra.Graph.NonEmpty.AdjacencyMap as NonEmptyAdjMap (fromNonE
 import Algebra.Graph.AdjacencyMap.Algorithm
 
 import GHC.TypeLits
-import GHC.TypeLits.Extra
+import GHC.TypeLits.Extra 
 import GHC.Exts (Constraint)
 import Data.List
 import Data.Maybe
@@ -62,38 +64,56 @@ instance Category GraphMorphism where
     id          = GM Prelude.id
     GM f . GM g = GM (f Prelude.. g)
 
+-- A test to see if the extra solver is enabled 
+
+-- x :: Proxy (30 :: Nat)
+-- x = Proxy
+-- y :: Proxy (25 :: Nat)
+-- y = Proxy
+-- z :: Proxy (5 :: Nat)
+-- z = f x y
+-- f :: (KnownNat n, KnownNat m) => Proxy n -> Proxy m -> Proxy (GCD n m) 
+-- f a b = Proxy
+
+-- d = sameNat (Proxy :: Proxy 4) (Proxy :: Proxy (Max 4 2))
+
 -- A tree of depth n or less
-data SmallTree (n :: Nat) a where
-    SmallTree :: (k<=n) => KTree (k :: Nat) a -> SmallTree n a
+data SmallTree n a where
+    SmallTree :: (KnownNat k, KnownNat n, k<=n) => KTree (Proxy k) a -> SmallTree (Proxy n) a
 
 -- A tree of depth n
-data KTree (n :: Nat) a where
-    KNode :: {
+data KTree n a where
+    KNode :: (KnownNat n) => {
         kRootLabel :: a,                 -- ^ label value
-        kSubForest :: SubForests (n-1) a -- ^ zero or more child trees
-    } -> KTree (n :: Nat) a
+        kSubForest :: SubForests (Proxy (n-1)) a -- ^ zero or more child trees
+    } -> KTree (Proxy n) a
 
 -- A list of trees, n is the maximum of the depths of the trees
-data SubForests (n :: Nat) a where
-    SFNil :: SubForests 0 a
-    SFCons :: KTree m a -> SubForests n a -> SubForests (Max n m) a
+data SubForests n a where
+    SFNil :: SubForests (Proxy (0::Nat)) a
+    SFCons :: (KnownNat m, KnownNat n) => KTree (Proxy m) a -> SubForests (Proxy n) a -> SubForests (Proxy (Max n m)) a
 
--- I somehow want to say f is a family of functions from KTree n a -> b for any n
-sfmap :: (KTree n a -> b) -> (SubForests n a) -> [b] 
-sfmap f SFNil           = []
-sfmap f (SFCons kt kts) = f kt : sfmap f kts
+-- -- map for Subforests - takes them to a list
+-- sfmap :: (KnownNat n) => (forall (n::Nat). KTree (Proxy n) a -> b) -> (SubForests (Proxy n) a) -> [b] 
+-- sfmap f SFNil           = []
+-- sfmap f (SFCons kt kts) = f kt : sfmap f kts
 
-ktfoldr :: (a -> [b] -> b) -> KTree n a -> b 
-ktfoldr f (KNode l st) = f l (sfmap (ktfoldr f) st)
+-- -- sfmap (ktfoldr f) :: KTree (Proxy n) a -> b) -> (SubForests (Proxy n-1) a) -> [b]
+-- ktfoldr :: (KnownNat n, KnownNat (n-1)) => (a -> [b] -> b) -> KTree (Proxy n) a -> b 
+-- ktfoldr f (KNode l st) = f l (sfmap (ktfoldr f) st)
 
 -- Specify n at the type level
 -- Is this possible with a foldTree or do the types get in the way too much?
 -- Also have I got the use of natVal right? I want to get the value from the type.
-treeToSmallTree :: (1<=n, KnownNat n) => Tree a -> Maybe (SmallTree n a)
-treeToSmallTree t = if depth < natVal Proxy then Just (SmallTree (foldTree f t)) else Nothing
-    where depth  = foldTree (\_ xs -> if null xs then 0 else 1 + maximum xs) t
-          f x xs = KNode x (foldr g SFNil xs)
-          g x xs = SFCons x xs
+-- treeToSmallTree :: (1<=n, KnownNat n) => Tree a -> Maybe (SmallTree (Proxy n) a)
+-- treeToSmallTree t = if depth < natVal Proxy then Just (SmallTree (ft t)) else Nothing
+--     where depth  = foldTree (\_ xs -> if null xs then 0 else 1 + maximum xs) t
+--           ft :: (KnownNat n1) => forall (n1::Nat). Tree a -> KTree (Proxy n1) a
+--           ft (Node x xs) = KNode x (sft xs)
+--           sft ::  (KnownNat n2) => forall (n2::Nat). [Tree a] -> SubForests (Proxy n2) a
+--           sft []     = SFNil
+--           sft (x:xs) = SFCons (ft x) (sft xs)
+
 
 -- Needs to preserve the roots of the trees in the forest
 data ForestMorphism a b where FM :: (Forest a -> Forest b) -> ForestMorphism a b 
@@ -262,10 +282,9 @@ universe = nub Prelude.. vertexList Prelude.. gcoerce
 --           f i uni = nub $ concat [map ((head uni):) ps|ps <- 
 --             (map (f (i-1)) ((init Prelude.. tails) uni))]
 
--- Doesn't behave properly for k > length uni, it only returns lists of length k not all less than
 plays :: Eq a => Int -> [a] -> [[a]]
 plays k uni
-    | length uni < k = f (k-(length uni)) (permutations uni)
+    | length uni < k = (plays (k-1) uni) ++ (f (k-(length uni)) (permutations uni))
     | otherwise       = concatMap (lengthksublists uni) [1..k]
         where f 0 xs = xs
               f i xs = nub $ concatMap (\x -> concatMap (allinserts x) pf) uni
@@ -283,7 +302,6 @@ lengthksublists xs k = concatMap f (elemPairs xs)
 elemPairs :: [a] -> [(a, [a])]
 elemPairs []     = []
 elemPairs (x:xs) = (x,xs) : (map (\(y,ys) -> (y,x:ys)) (elemPairs xs))
-
 
 
 --isPlayCompatible :: (GraphExtras a, Eq (Vertex a)) => a -> [Vertex a] -> Bool
@@ -378,8 +396,6 @@ checkValidPebkGraph k g pebg = foldr f True (edgeList (gcoerce pebg))
                 where h xs' ys' = foldr (\(x,_) b' -> (lastx /= x) && b') True (drop (length xs') ys') 
                         where lastx     = fst (last xs')
 
-liftMapToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> GraphMorphism (EF a) b
-liftMapToEFMorph f = GM f Category.. counit
 
 
 -- Checks that there is a valid homomorphism from EF A -> B and EF B -> A. This is the condition

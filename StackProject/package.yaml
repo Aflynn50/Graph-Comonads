@@ -10,6 +10,8 @@ extra-source-files:
 - README.md
 - ChangeLog.md
 
+
+
 # Metadata used when publishing your package
 # synopsis:            Short description of your package
 # category:            Web
@@ -27,6 +29,7 @@ dependencies:
 - graphviz
 - random
 - ghc-typelits-extra
+
 library:
   source-dirs: src
 
