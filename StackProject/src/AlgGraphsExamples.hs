@@ -93,38 +93,6 @@ getIso ((a,b):iso) x
     | x == a     = b
     | otherwise  = getIso iso x
 
--- Given a spoilers play come up with the duplicators 
--- This uses the strategy given on page 29 of Libkin
--- This doesnt work, strategy2 does
--- Pre: length lin1,lin2 >= 2^k
---      length spoil <= k
--- strategy :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b)) 
---                         => Int -> a -> b -> [Vertex a] -> [Vertex b]
--- strategy k glin1 glin2 spoil = map (getIso iso) spoil
---     where lin1 = graphToLin glin1
---           lin2 = graphToLin glin2
---           iso  = f k lin1 lin2 spoil
-
-
--- f :: Eq a => Int -> [a] -> [b] -> [a] -> [(a,b)]
--- f _ _ _ [] = []
--- f 0 _ _ _  = []
--- f k lin1 lin2 (p:ps)
---     | inIso p iso = iso
---     | otherwise   = (p,chooseb k lin1 lin2 p) : iso
---       where iso   = f (k-1) lin1 lin2 ps
-
-
--- -- This is the function that given an 'a' in lin1 finds a 'b' in lin2 s.t. lin1 - a =_(k-1) lin2 - b
--- chooseb :: Eq a => Int -> [a] -> [b] -> a -> b
--- chooseb k lin1 lin2 a
---     | length lin1LT < 2^(k-1) = lin2 !! index a lin1
---     | length lin1GT < 2^(k-1) = lin2 !! index a lin1
---     | otherwise               = lin2 !! (2^(k-1)) -- proper way to do it would be split
---     where (lin1LT,lin1GT) = split a lin1
-
-
--- do I need 
 strategy2 :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b)) 
                         => Int -> a -> b -> [Vertex a] -> [Vertex b]
 strategy2 k glin1 glin2 spoil = map (getIso iso) spoil
@@ -171,7 +139,7 @@ both f (x,y) = (f x, f y)
 -- Builds the morphism f: EFk(A) -> B
 buildLinMorph :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b), Ord (Vertex a), Ord a)
                 => Int -> a -> b -> GraphMorphism (EF a) b
-buildLinMorph k glin1 glin2 = counit Category.. GM (strategy2 k glin1 glin2)
+buildLinMorph k glin1 glin2 = GM (last Prelude.. strategy2 k glin1 glin2)
 
 
 checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
@@ -204,27 +172,28 @@ generateCycleG k = (symmetricClosure (AdjMap.circuit [1..2^k+1]),
 -- Duplicators strategy is to ensure that the distance between any two of her pebbles is either the equal to the
 -- distance between the corrosponding pair of the spoilers pebbles, or, it is greater than 2^k-r. If the two spoilers
 -- pebbels are on the same graph then it needs to be equal, otherwise greater than 2^k
-cycStrategy :: (Graph a, Graph b, Eq a, Ord a) => Int -> AdjacencyMap a -> AdjacencyMap a -> [a] -> [a]
+-- Spoil plays in g1
+cycStrategy :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord (Vertex a), Ord (Vertex b)) 
+                    => Int -> a -> b -> [Vertex a] -> [Vertex b]
 cycStrategy k g1 g2 spoil = f spoil [] [] 1
     where f []     ss ds r = ds
-          f (x:xs) ss ds r = f xs (ss++[x]) (ds++[g (findEqualPlacing x g1 g2 ss ds)]) (r+1)
+          f (x:xs) ss ds r = f xs (ss++[x]) (ds++[g (findEqualPlacing x (gcoerce g1) (gcoerce g2) ss ds)]) (r+1)
             where g (Just y) = y
-                  g Nothing  = findFarPlacing k r g1 ds
-
--- cycStrategy :: (Eq a, Ord a) => Int -> AdjacencyMap a -> AdjacencyMap a -> [a] -> [a]
--- cycStrategy k g1 g2 spoil = f spoil [] [] 1
---     where f []     ss ds r = ds
---           f (x:xs) ss ds r = f xs (ss++[x]) (ds++[g (findEqualPlacing x g1 g2 ss ds)]) (r+1)
---             where g (Just y) = y
---                   g Nothing  = findFarPlacing k r g1 ds
+                  g Nothing  = findFarPlacing k r x (gcoerce g1) (gcoerce g2) ss ds
 
 -- Remove all elems of xs from ys
 removeL :: Eq a => [a] -> [a] -> [a]
 removeL xs ys = filter (\y -> not (elem y xs)) ys
 
-findFarPlacing :: (Eq a, Ord a) => Int -> Int -> AdjacencyMap a -> [a] -> a
-findFarPlacing k r g dup = head $ foldr (\x xs -> intersect (getGTIAway x d g) xs) (vertexList g) dup
-    where d = 2^(k-r)
+-- Find a placing in g2 of distance 2^(k-r) away from all others, if it is the last node to be places, make sure it
+-- respects adjancecy since it will be of dist 1 away
+findFarPlacing :: (Eq a, Ord a, Ord b) => Int -> Int -> a -> AdjacencyMap a -> AdjacencyMap b -> [a] -> [b] -> b
+findFarPlacing k r n g1 g2 spoil dup = if d==1 && t then head (intersect neighbours2 placings) else head placings
+    where placings    = foldr (\x xs -> intersect (getGTIAway x d g2) xs) (vertexList g2) dup
+          d           = 2^(k-r)
+          t           = elem (last spoil) neighbours1
+          neighbours1 = getIAway n 1 g1
+          neighbours2 = getIAway (last dup) 1 g2
 
 -- get closer nodes then take them away from whole graph
 -- Get all nodes of distance i or larger from n in g
@@ -238,22 +207,21 @@ getGTIAway n i g = removeL (f 0 [] [n]) (vertexList g)
                       newV  = visited ++ nodes
           adjMap = Map.fromList (adjacencyList g ) 
 
--- Find placing of node on g1 s.t. it preserves the none-infinite distances to the nodes in g2
+-- Find placing of node on g2 s.t. it preserves the none-infinite distances to the nodes in g1
 -- If this is impossible return Nothing.
 -- Dup and spoil should be the same length
 -- Go through nodes close to n in other graph and see if there are any positions you can place the new one that
 -- Keep the distances
--- Spoil plays in g1, dup in g2
 -- If the distances of all spoilers plays are Nothing then return Nothing
-findEqualPlacing :: (Eq a, Ord a) => a -> AdjacencyMap a -> AdjacencyMap b -> [a] -> [a] -> Maybe a
+findEqualPlacing :: (Show a, Show b, Eq a, Ord a, Ord b) => a -> AdjacencyMap a -> AdjacencyMap b -> [a] -> [b] -> Maybe b
 findEqualPlacing n g1 g2 spoil dup = if incomparableS then Nothing 
                                                 else listToMaybe $ removeL dup $ foldr f g1Vlist (zip spoil dup) 
-    where spoilDists   = getCycDistances n g2 spoil
+    where spoilDists   = getCycDistances n g1 spoil
           f (x,y) xs   = intersect (g y (fromJust (Map.lookup x spoilDists))) xs
-          g y (Just d)   = getIAway y d g1
+          g y (Just d)   = getIAway y d g2
           g y Nothing    = g1Vlist
           incomparableS  = foldr (\x xs -> (x==Nothing) && xs) True (Map.elems spoilDists)
-          g1Vlist      = vertexList g1
+          g1Vlist      = vertexList g2
 
 
 getIAway :: (Eq a, Ord a) => a -> Int -> AdjacencyMap a -> [a]
@@ -268,7 +236,7 @@ getIAway n i g = nub (f 0 [] [n])
 -- Given a node and a graph find the distance from it to each other node in spoil (Nothing if infinite)
 -- Only works graphs that are a collection of cycles
 -- Dists should be a map
-getCycDistances :: (Eq a, Ord a) => a -> AdjacencyMap a -> [a] -> Map a (Maybe Int)
+getCycDistances :: (Show a, Eq a, Ord a) => a -> AdjacencyMap a -> [a] -> Map a (Maybe Int)
 getCycDistances n g spoil = foldr (\x xs-> Map.insert x (Map.lookup x listOfDists) xs) Map.empty spoil 
     where listOfDists                 = f 0 [] [n] Map.empty
           f d visited [] dists        = dists
@@ -276,19 +244,36 @@ getCycDistances n g spoil = foldr (\x xs-> Map.insert x (Map.lookup x listOfDist
                 where newN = concatMap (\x -> removeL newV (fromJust (Map.lookup x adjMap))) nodes
                       newD  = foldr (\x xs -> Map.insert x d xs) dists nodes
                       newV  = visited ++ nodes
-          adjMap = Map.fromList (adjacencyList g )
-
--- Builds the morphism f: EFk(A) -> B
-buildCycleMorph :: (Eq a, Ord a)( => Int -> a -> b -> GraphMorphism (EF Int) Int
-buildMorphEFkAtoB k glin1 glin2 = counit Category.. GM (strategy2 k glin1 glin2)
+          adjMap = Map.fromList (adjacencyList g)
 
 
-checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
-checkEFkMorph k glin1 glin2 = apply (buildMorphEFkAtoB k glin1 glin2) eflin1
-    where eflin1 = graphToEFk k glin1
+buildCycleMorph :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord a, Ord (Vertex a), Ord (Vertex b))
+                => Int -> a -> b -> GraphMorphism (EF a) b
+buildCycleMorph k glin1 glin2 = GM (last Prelude.. cycStrategy k glin1 glin2)
 
 
 
+
+getEFkMorphCyc :: (Show a, Show b, Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
+getEFkMorphCyc k glin1 glin2 = apply (buildMorphFromStrat cycStrategy k glin1 glin2) eflin1
+     where eflin1 = graphToEFk k glin1
+
+k = 3
+(g1,g2) = generateCycleG k
+
+res7 = getEFkMorphCyc k g1 g2
+
+res8 = checkMorphIsHomo (gcoerce (graphToEFk k g1)) g2 (buildCycleMorph k g1 g2)
+
+-- Playing on big
+res9 l = cycStrategy k g1 g2 l
+
+-- Playing on 2 small
+res10 l = cycStrategy k g2 g1 l
+-- res11 :: EF (AdjacencyMap Int)
+-- res11 = apply (GM ( k g1 g2)) (graphToEFk k g1)
+res12 = graphToEFk k g1
+res13 = checkMorphIsHomoDebug (gcoerce (graphToEFk k g1)) g2 (buildCycleMorph k g1 g2)
 
 ------------------ Hamiltonian --------------------
 

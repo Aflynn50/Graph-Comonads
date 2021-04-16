@@ -15,10 +15,7 @@
 {-# LANGUAGE InstanceSigs           #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE RankNTypes             #-}
-{-# LANGUAGE KindSignatures #-}
-
-
-{-# OPTIONS_GHC -fplugin GHC.TypeLits.Extra.Solver #-}
+{-# LANGUAGE KindSignatures         #-}
 
 
 module AlgGraphsCat where
@@ -57,63 +54,17 @@ import Category
 --    The universe of EF and pebble should both be none empty lists
 -- EF category
 
+
+-- I could maybe change the EF and Peb datatypes to accept a graph that has graph coerce implemented
+-- rather than just forcing it to be an AdjMap, then make gcoerce call down the stack, this would
+-- allow stacking of functor actions
+
 data GraphMorphism a b where GM :: (Graph a, Graph b) => (Vertex a -> Vertex b) -> GraphMorphism a b 
 
 instance Category GraphMorphism where
     type Object GraphMorphism g = Graph g
     id          = GM Prelude.id
     GM f . GM g = GM (f Prelude.. g)
-
--- A test to see if the extra solver is enabled 
-
--- x :: Proxy (30 :: Nat)
--- x = Proxy
--- y :: Proxy (25 :: Nat)
--- y = Proxy
--- z :: Proxy (5 :: Nat)
--- z = f x y
--- f :: (KnownNat n, KnownNat m) => Proxy n -> Proxy m -> Proxy (GCD n m) 
--- f a b = Proxy
-
--- d = sameNat (Proxy :: Proxy 4) (Proxy :: Proxy (Max 4 2))
-
--- A tree of depth n or less
-data SmallTree n a where
-    SmallTree :: (KnownNat k, KnownNat n, k<=n) => KTree (Proxy k) a -> SmallTree (Proxy n) a
-
--- A tree of depth n
-data KTree n a where
-    KNode :: (KnownNat n) => {
-        kRootLabel :: a,                 -- ^ label value
-        kSubForest :: SubForests (Proxy (n-1)) a -- ^ zero or more child trees
-    } -> KTree (Proxy n) a
-
--- A list of trees, n is the maximum of the depths of the trees
-data SubForests n a where
-    SFNil :: SubForests (Proxy (0::Nat)) a
-    SFCons :: (KnownNat m, KnownNat n) => KTree (Proxy m) a -> SubForests (Proxy n) a -> SubForests (Proxy (Max n m)) a
-
--- -- map for Subforests - takes them to a list
--- sfmap :: (KnownNat n) => (forall (n::Nat). KTree (Proxy n) a -> b) -> (SubForests (Proxy n) a) -> [b] 
--- sfmap f SFNil           = []
--- sfmap f (SFCons kt kts) = f kt : sfmap f kts
-
--- -- sfmap (ktfoldr f) :: KTree (Proxy n) a -> b) -> (SubForests (Proxy n-1) a) -> [b]
--- ktfoldr :: (KnownNat n, KnownNat (n-1)) => (a -> [b] -> b) -> KTree (Proxy n) a -> b 
--- ktfoldr f (KNode l st) = f l (sfmap (ktfoldr f) st)
-
--- Specify n at the type level
--- Is this possible with a foldTree or do the types get in the way too much?
--- Also have I got the use of natVal right? I want to get the value from the type.
--- treeToSmallTree :: (1<=n, KnownNat n) => Tree a -> Maybe (SmallTree (Proxy n) a)
--- treeToSmallTree t = if depth < natVal Proxy then Just (SmallTree (ft t)) else Nothing
---     where depth  = foldTree (\_ xs -> if null xs then 0 else 1 + maximum xs) t
---           ft :: (KnownNat n1) => forall (n1::Nat). Tree a -> KTree (Proxy n1) a
---           ft (Node x xs) = KNode x (sft xs)
---           sft ::  (KnownNat n2) => forall (n2::Nat). [Tree a] -> SubForests (Proxy n2) a
---           sft []     = SFNil
---           sft (x:xs) = SFCons (ft x) (sft xs)
-
 
 -- Needs to preserve the roots of the trees in the forest
 data ForestMorphism a b where FM :: (Forest a -> Forest b) -> ForestMorphism a b 
@@ -257,12 +208,18 @@ getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.overlay (AdjMap.edges keptE) (Adj
 apply :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord (Vertex a), Ord (Vertex b)) => GraphMorphism a b -> a -> b
 apply (GM gm) g = gcoerceRev (gmap gm (gcoerce g))
 
+-- change to use GraphCoerce
+-- Check if each edge in g1 is mapped by gm to an edge in g2
 checkMorphIsHomo :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Eq b) => AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> Bool
 checkMorphIsHomo g1 g2 (GM gm) = foldr (\e b -> elem e eG2 && b) True eMapped
     where eMapped = map (\(x,y) -> (gm x,gm y)) (edgeList g1)
           eG2     = edgeList g2
 
-
+-- Get all edges in g1 (and their mappings under gm) that are not mapped to an edge in g2 by gm
+checkMorphIsHomoDebug :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Eq b) => AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> [((a,a),(b,b))]
+checkMorphIsHomoDebug g1 g2 (GM gm) = [(e1,e2)| (e1,e2) <- eMapped,not (elem e2 eG2)]
+    where eMapped = map (\(x,y) -> ((x,y),(gm x,gm y))) (edgeList g1)
+          eG2     = edgeList g2
 
 -- universe of a graph
 universe :: (GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
@@ -403,3 +360,10 @@ checkValidPebkGraph k g pebg = foldr f True (edgeList (gcoerce pebg))
 eqUpToQuantRankK :: (Eq b, Ord a, Ord b) => Int -> GraphMorphism (EF (AdjacencyMap a)) (AdjacencyMap b) -> 
     GraphMorphism (EF (AdjacencyMap b)) (AdjacencyMap a) -> AdjacencyMap a -> AdjacencyMap b -> Bool
 eqUpToQuantRankK k h1 h2 g1 g2 = (apply h1 (graphToEFk k g1) == g2) && (apply h2 (graphToEFk k g2) == g1)
+
+-- Given a duplicator strategy builds the graph morphism f: EFk(A) -> B
+buildMorphFromStrat :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord a, Ord (Vertex a), Ord (Vertex b),
+                        Eq (Vertex a), Eq (Vertex b)) => (Int -> a -> b -> [Vertex a] -> [Vertex b])
+                        -> Int -> a -> b -> GraphMorphism (EF a) b
+buildMorphFromStrat strat k glin1 glin2 = GM (last Prelude.. strat k glin1 glin2)
+

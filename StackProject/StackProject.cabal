@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d4a5ab99d143e445d61e4625da2b951fc3bde39682e4207aaaf199e806058f68
+-- hash: e462ee58c5fd6fe38259b6affb80025528eea298435e2836fc757f41c0267df4
 
 name:           StackProject
 version:        0.1.0.0
@@ -29,6 +29,7 @@ library
   exposed-modules:
       AlgGraphsCat
       AlgGraphsExamples
+      BoundedTrees
       Category
       DrawGraphs
       EF
