@@ -51,9 +51,6 @@ class (Category cat) => CComonad f cat where
     => cat (f a) (f (f a))
   duplicate = extend Category.id
 
--- class (Category dom, Category cod) => CFunctor f dom cod where
---   funcMap :: (Object dom a, Object cod (f a), Object dom b, Object cod (f b)) => dom a b -> cod (f a) (f b)
-
 
 class (Category dom, Category cod, CFunctor l dom cod, CFunctor r cod dom) => Adjunction cod dom l r where
   eta :: (Object dom a, Object dom (l (r b))) => dom a b
@@ -73,21 +70,3 @@ instance Category (CoKleisli f cat) where
 -- I dont think giving the eilenberg moore category is possible in Haskell (with this cate defn), the 
 -- objects would have to be functions, not sure how I could enforece this with a constraint. 
 -- ConstraintKinds gives constraints kinds rather than leting kinds be constraints :(
-
-
--- class Category (k :: κ -> κ -> *) where
---   type Object k (o :: κ) :: Constraint
---   type Object k o = ()
---   id :: Object k a => k a a
---   (.) :: (Object k a, Object k b, Object k c) 
---          => k b c -> k a b -> k a c
-
--- class (Category r, Category t) => RFunctor f r t where
---   fmap :: (Object r a, Object t (f a), Object r b, Object t (f b))
---      => r a b -> t (f a) (f b)
-
-
--- class (RFunctor m k k) => RComonad m k where
---     counit :: Object k a => k (m a) a
---     coextend :: (Object k a, Object k b) => k (m a) b -> k (m a) (m b)
-

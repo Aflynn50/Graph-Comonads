@@ -31,7 +31,7 @@ import Category
 import AlgGraphsCat 
 import DrawGraphs
 
------------------- Example with two equivilent graphs  -------------------- 
+------------------ Proof of concept example with two equivilent graphs  -------------------- 
 -- With EF comonad I can only prove them equivilent in fragment of logic with quantifier rank k.
 -- To do this we give a coklislie morphism that takes the EK graph with play length k to graph b
 graph1 :: AdjacencyMap Int
@@ -43,17 +43,17 @@ graph2 = AdjMap.edges [('a','b'),('b','c')]
 liftMapToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> GraphMorphism (EF a) b
 liftMapToEFMorph f = GM f Category.. counit
 
-g1tog2 = liftMapToEFMorph f 
+g1tog2 = CoKleisli $ liftMapToEFMorph f 
   where f 1 = 'a'
         f 2 = 'b'
         f 3 = 'c'
 
-g2tog1 = liftMapToEFMorph f 
+g2tog1 = CoKleisli $ liftMapToEFMorph f 
   where f 'a' = 1
         f 'b' = 2
         f 'c' = 3 
 
-res1 = eqUpToQuantRankK 4 g1tog2 g2tog1 graph1 graph2
+proof1 = eqQRankKCounting 4 g1tog2 g2tog1 graph1 graph2
 
 ------------------ Example with linear orderings  --------------------
 -- Given a list representing a linear ordering it returns the equivilent
@@ -69,7 +69,7 @@ count x = foldr (\y xs-> if x==y then xs + 1 else xs) 0
 -- converts a graph to a linear order
 -- Pre: Graph is a representation of a lin order
 graphToLin :: (Graph a, GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
-graphToLin g = reverse $ map fst $ sortBy (\(_,a) (_,b) -> compare a b) $ map (\x -> (x,count x e)) (universe g)
+graphToLin g = reverse $ map fst $ sortBy (\(_,a) (_,b) -> compare a b) $ map (\x -> (x,count x e)) (gvertices g)
     where e = map fst (edgeList (gcoerce g))
 
 -- Pre: elem x xs
@@ -146,8 +146,6 @@ checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> Ad
 checkEFkMorph k glin1 glin2 = apply (buildLinMorph k glin1 glin2) eflin1
     where eflin1 = graphToEFk k glin1
 
-
-lin1 :: AdjacencyMap Integer
 lin1 = linToGraph [1..17]
 lin2 = linToGraph [3..22]
 
@@ -160,8 +158,8 @@ lin6 = linToGraph [1..4]
 lin7 = linToGraph [5..8]
 res2 = checkEFkMorph 2 lin6 lin7
 
-res3 = checkMorphIsHomo (gcoerce (graphToEFk 2 lin4)) lin5 (buildLinMorph 2 lin4 lin5)
-res4 = checkMorphIsHomo (gcoerce (graphToEFk 4 lin1)) lin2 (buildLinMorph 4 lin1 lin2)
+res3 = checkMorphIsHomo (graphToEFk 2 lin4) lin5 (buildLinMorph 2 lin4 lin5)
+res4 = checkMorphIsHomo (graphToEFk 4 lin1) lin2 (buildLinMorph 4 lin1 lin2)
 
 ------------------ Two colourability/Even/Connectivity  -------------------- 
 -- Does this need to be the symetric closure of the graphs?
@@ -248,8 +246,8 @@ getCycDistances n g spoil = foldr (\x xs-> Map.insert x (Map.lookup x listOfDist
 
 
 buildCycleMorph :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord a, Ord (Vertex a), Ord (Vertex b))
-                => Int -> a -> b -> GraphMorphism (EF a) b
-buildCycleMorph k glin1 glin2 = GM (last Prelude.. cycStrategy k glin1 glin2)
+                => Int -> a -> b -> CoKleisli EF GraphMorphism a b
+buildCycleMorph k glin1 glin2 = CoKleisli $ GM (last Prelude.. cycStrategy k glin1 glin2)
 
 
 
@@ -263,7 +261,7 @@ k = 3
 
 res7 = getEFkMorphCyc k g1 g2
 
-res8 = checkMorphIsHomo (gcoerce (graphToEFk k g1)) g2 (buildCycleMorph k g1 g2)
+-- res8 = checkMorphIsHomo (graphToEFk k g1) g2 (buildCycleMorph k g1 g2)
 
 -- Playing on big
 res9 l = cycStrategy k g1 g2 l
@@ -273,7 +271,8 @@ res10 l = cycStrategy k g2 g1 l
 -- res11 :: EF (AdjacencyMap Int)
 -- res11 = apply (GM ( k g1 g2)) (graphToEFk k g1)
 res12 = graphToEFk k g1
-res13 = checkMorphIsHomoDebug (gcoerce (graphToEFk k g1)) g2 (buildCycleMorph k g1 g2)
+-- res13 = checkMorphIsHomoDebug (graphToEFk k g1) g2 (buildCycleMorph k g1 g2)
+proof2 = eqQRankKEPfrag k (buildCycleMorph k g1 g2) (buildCycleMorph k g2 g1) g1 g2
 
 ------------------ Hamiltonian --------------------
 
@@ -319,21 +318,6 @@ hamStratRec k [] revdup = reverse revdup
 hamStratRec k ((pi,n):xs) revdup 
     | n <= k     = hamStratRec k xs ((pi,unusedKLT k revdup):revdup)
     | otherwise  = hamStratRec k xs ((pi,unusedKGT k revdup):revdup)
-
-
--- elemInIso :: Eq a => a -> [(Int,b)] -> Bool
--- elemInIso x []    = False
--- elemInIso x ((i,a):ps)
---     | a==x      = True 
---     | otherwise = elemInIso x ps
-
--- pebInIso :: Eq a => Int -> [((Int,a),(Int,b))] -> Bool
--- pebInIso x []    = False
--- pebInIso x (((i,a),(j,b)):ps)
---     | j==x      = True 
---     | otherwise = inIso x ps
-
-
 
 ------------------ Tree depth experiments  -------------------- 
 

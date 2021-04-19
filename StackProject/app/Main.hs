@@ -6,4 +6,4 @@ main :: IO ()
 --main = return ()
 main = do 
     g <- getStdGen
-    (putStr . show) res1
+    (putStr . show) proof1
