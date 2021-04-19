@@ -196,8 +196,8 @@ coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 -- universe that are not in edges without enumerating the type so its not really feasable to get the true equiliser
 getEqualizer :: (GraphCoerce a, GraphCoerce b, Ord (Vertex a), Eq (Vertex a), Eq (Vertex b)) =>    
         a -> b -> GraphMorphism a b -> GraphMorphism a b -> (a, GraphMorphism a a)
-getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.edges keptE, GM Prelude.id)
-    where vinE      = nub (concatMap (\(x,y) -> [x,y]) (edgeList g1))
+getEqualizer g1 g2 (GM gm1) (GM gm2) = (gcoerceRev (AdjMap.edges keptE), GM Prelude.id)
+    where vinE      = nub (concatMap (\(x,y) -> [x,y]) (edgeList adjg1))
           keptV     = map fst (intersect (map (\x -> (x,gm1 x)) vinE) (map (\x -> (x,gm2 x)) vinE))
           keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList adjg1)
           adjg1     = gcoerce g1
