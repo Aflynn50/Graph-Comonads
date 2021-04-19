@@ -190,15 +190,18 @@ coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 -- Z
 -- This finds all the vertacies in A for which all edges they are included in are preserved by f and g in B.
 -- It then builds the subgraph of A, G that only includes these vertacies
--- Any vertacies not in an edge in A are also included in G despite the fact that a vertex with no edges doesnt mean
--- anything since we take the type to be the universe, this was done in case we change the representation. 
-getEqualizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
-        AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> GraphMorphism c d -> (AdjacencyMap a, GraphMorphism c c)
-getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.overlay (AdjMap.edges keptE) (AdjMap.vertices disjointV), GM Prelude.id)
+
+-- Not really a true equaliser, for that we would need to introduce a new type, c, that contained only the members of a
+-- that were preserved by the homomorpism. We have no reasonable way of getting the action of the morpisms elements in the 
+-- universe that are not in edges without enumerating the type so its not really feasable to get the true equiliser
+getEqualizer :: (GraphCoerce a, GraphCoerce b, Ord (Vertex a), Eq (Vertex a), Eq (Vertex b)) =>    
+        a -> b -> GraphMorphism a b -> GraphMorphism a b -> (a, GraphMorphism a a)
+getEqualizer g1 g2 (GM gm1) (GM gm2) = (AdjMap.edges keptE, GM Prelude.id)
     where vinE      = nub (concatMap (\(x,y) -> [x,y]) (edgeList g1))
           keptV     = map fst (intersect (map (\x -> (x,gm1 x)) vinE) (map (\x -> (x,gm2 x)) vinE))
-          disjointV = filter (\x -> not (elem x keptV)) (vertexList g1)
-          keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList g1)
+          keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList adjg1)
+          adjg1     = gcoerce g1
+
 
 
 -- getCoequalizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
