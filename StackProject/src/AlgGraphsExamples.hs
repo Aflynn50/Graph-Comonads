@@ -40,15 +40,15 @@ graph1 = AdjMap.edges [(1,2),(2,3)]
 graph2 :: AdjacencyMap Char
 graph2 = AdjMap.edges [('a','b'),('b','c')]
 
-liftMapToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> GraphMorphism (EF a) b
-liftMapToEFMorph f = GM f Category.. counit
+liftIsoToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> GraphMorphism (EF a) b
+liftIsoToEFMorph f = GM f Category.. counit
 
-g1tog2 = CoKleisli $ liftMapToEFMorph f 
+g1tog2 = CoKleisli $ liftIsoToEFMorph f 
   where f 1 = 'a'
         f 2 = 'b'
         f 3 = 'c'
 
-g2tog1 = CoKleisli $ liftMapToEFMorph f 
+g2tog1 = CoKleisli $ liftIsoToEFMorph f 
   where f 'a' = 1
         f 'b' = 2
         f 'c' = 3 
@@ -63,6 +63,7 @@ linToGraph xs = AdjMap.edges (f xs)
   where f [] = []
         f (x:xs) = map (\y -> (x,y)) xs ++ f xs
 
+-- Counts occurrences of x in a list
 count :: Eq a => a -> [a] -> Int
 count x = foldr (\y xs-> if x==y then xs + 1 else xs) 0
 
@@ -72,97 +73,119 @@ graphToLin :: (Graph a, GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
 graphToLin g = reverse $ map fst $ sortBy (\(_,a) (_,b) -> compare a b) $ map (\x -> (x,count x e)) (gvertices g)
     where e = map fst (edgeList (gcoerce g))
 
+-- Splits the list into two parts on x with the middle element repeting
 -- Pre: elem x xs
 split :: Eq a => a -> [a] -> ([a],[a])
 split x xs = f [] xs
     where f xs (y:ys) = if x == y then (reverse (x:xs), x:ys) else f (y:xs) ys
-          
+
+-- Splits the list into two parts at index i with middle element repeting
 splitAtD :: Int -> [a] -> ([a],[a])
 splitAtD i xs = (\(x,y) -> (x++[head y],y)) $ splitAt i xs
 
--- Get pos of y in xs
+-- Get position of y in xs
 -- Pre: y is in xs
 index y xs = f xs 0
     where f (x:xs) i
             | x == y    = i
             | otherwise = f xs (i+1)
 
+-- Like lookup but crashes if x isnt in the list
 -- Pre: x is in the iso
 getIso :: Eq a => [(a,b)] -> a -> b
 getIso ((a,b):iso) x 
     | x == a     = b
     | otherwise  = getIso iso x
 
-strategy2 :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b)) 
-                        => Int -> a -> b -> [Vertex a] -> [Vertex b]
-strategy2 k glin1 glin2 spoil = map (getIso iso) spoil
-    where lin1 = graphToLin glin1
-          lin2 = graphToLin glin2
-          iso  = f2 k lin1 lin2 spoil []
-
-
--- Plan:
--- Keep the iso in the argument and pass it around, if somethings already in the iso then we can continue on to the next
--- spoiler play. If not then for the first two cases we want to zip together the appropriate parts of the list, add them 
--- to the iso and if the spoiler plays something not in the iso, call f2 on the remaining bit. It may seem strange that there
--- will be points on recursive calls of f2 that the spoiler can play outside lin1 but in that case it should be in iso.
-f2 :: (Eq a, Eq b) => Int -> [a] -> [b] -> [a] -> [(a,b)] -> [(a,b)]
-f2 _ _ _ [] iso = iso
-f2 0 _ _ _  iso = iso
-f2 k lin1 lin2 (a:ps) iso
-    | inIso a iso             = f2 (k-1) lin1 lin2 ps iso
-    | length lin1LT < 2^(k-1) = f2 (k-1) lin1GT lin2GTc1 ps (iso ++ zip lin1LT lin2LTc1)
-    | length lin1GT < 2^(k-1) = f2 (k-1) lin1LT lin2LTc2 ps (iso ++ zip lin1GT lin2GTc2) -- doesnt matter that they're not reversed since they should be same size
-    | otherwise               = lemma (k-1) (lin1LT,lin1GT) (lin2LTc3,lin2GTc3) ps ((a,bc3):iso)
-      where (lin1LT,lin1GT)     = split a lin1
-            (lin2LTc1,lin2GTc1) = splitAtD (index a lin1) lin2
-            (lin2GTc2,lin2LTc2) = both reverse (splitAtD (length lin1 - index a lin1) (reverse lin2))
-            (lin2LTc3,lin2GTc3) = splitAtD (2^(k-1)) lin2 -- check this has 2^k-1 elems
-            bc3                 = lin2 !! (2^(k-1))
-
+-- Check if x occurs as first elem in any of the pairs 
 inIso :: Eq a => a -> [(a,b)] -> Bool
 inIso x []    = False
 inIso x ((a,b):ps)
     | x==a      = True 
     | otherwise = inIso x ps
 
-
-lemma :: (Eq a, Eq b) => Int -> ([a], [a]) -> ([b], [b]) -> [a] -> [(a, b)] -> [(a, b)]
-lemma k (lin11,lin12) (lin21,lin22) ps iso = nub $ f2 k lin11 lin21 p1 iso ++ f2 k lin12 lin22 p2 iso
-    where (p1,p2) = partition (flip elem lin11) ps
-
 both :: (a -> b) -> (a, a) -> (b, b)
 both f (x,y) = (f x, f y)
 
+-- Take two linear orders as graphs, and a spoilers play, return the duplicators play
+-- Pre: Both the linear orders are at least length 2^k.
+linStrategy :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b)) 
+                        => Int -> a -> b -> [Vertex a] -> [Vertex b]
+linStrategy k glin1 glin2 spoil = map (getIso iso) spoil
+    where lin1 = graphToLin glin1
+          lin2 = graphToLin glin2
+          iso  = linRec k lin1 lin2 spoil []
+
+-- Recusivly implement the strategy
+-- Plan:
+-- Keep the iso in the argument and pass it around, if somethings already in the iso then we can continue on to the next
+-- spoiler play. If not then for the first two cases we want to zip together the appropriate parts of the list, add them 
+-- to the iso and if the spoiler plays something not in the iso, call linRec on the remaining bit. It may seem strange that
+-- there will be points on recursive calls of linRec that the spoiler can play outside lin1 but in that case it should be in
+-- iso.
+linRec :: (Eq a, Eq b) => Int -> [a] -> [b] -> [a] -> [(a,b)] -> [(a,b)]
+linRec _ _ _ [] iso = iso
+linRec 0 _ _ _  iso = iso
+linRec k lin1 lin2 (a:ps) iso
+    | inIso a iso             = linRec (k-1) lin1 lin2 ps iso
+    | length lin1LT < 2^(k-1) = linRec (k-1) lin1GT lin2GTc1 ps (iso ++ zip lin1LT lin2LTc1)
+    | length lin1GT < 2^(k-1) = linRec (k-1) lin1LT lin2LTc2 ps (iso ++ zip lin1GT lin2GTc2)
+    | otherwise               = lemma (k-1) (lin1LT,lin1GT) (lin2LTc3,lin2GTc3) ps ((a,bc3):iso)
+      where (lin1LT,lin1GT)     = split a lin1
+            (lin2LTc1,lin2GTc1) = splitAtD (index a lin1) lin2
+            (lin2GTc2,lin2LTc2) = both reverse (splitAtD (length lin1 - index a lin1) (reverse lin2))
+            (lin2LTc3,lin2GTc3) = splitAtD (2^(k-1)) lin2
+            bc3                 = lin2 !! (2^(k-1))
+
+-- The lemma from the proof
+lemma :: (Eq a, Eq b) => Int -> ([a], [a]) -> ([b], [b]) -> [a] -> [(a, b)] -> [(a, b)]
+lemma k (lin11,lin12) (lin21,lin22) ps iso = nub $ linRec k lin11 lin21 p1 iso ++ linRec k lin12 lin22 p2 iso
+    where (p1,p2) = partition (flip elem lin11) ps
 
 
--- Builds the morphism f: EFk(A) -> B
-buildLinMorph :: (Graph a, Graph b, GraphCoerce a, GraphCoerce b, Eq (Vertex a), Eq (Vertex b), Ord (Vertex a), Ord a)
-                => Int -> a -> b -> GraphMorphism (EF a) b
-buildLinMorph k glin1 glin2 = GM (last Prelude.. strategy2 k glin1 glin2)
+-- checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
+-- checkEFkMorph k glin1 glin2 = apply ((buildMorphFromStrat linStrategy) k glin1 glin2) eflin1
+--     where eflin1 = graphToEFk k glin1
 
 
-checkEFkMorph :: (Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
-checkEFkMorph k glin1 glin2 = apply (buildLinMorph k glin1 glin2) eflin1
-    where eflin1 = graphToEFk k glin1
+--res2 = checkEFkMorph 2 lin6 lin7
 
-lin1 = linToGraph [1..17]
-lin2 = linToGraph [3..22]
+--res3 = checkMorphIsHomo (graphToEFk 2 lin4) lin5 (buildLinMorph 2 lin4 lin5)
+--res4 = checkMorphIsHomo (graphToEFk 4 lin1) lin2 (buildLinMorph 4 lin1 lin2)
 
-lin3 = linToGraph [1,2,3]
 
-lin4 = linToGraph [1..9]
-lin5 = linToGraph [4..12]
+-- Would be good to abstract this to some "checkStrat" function but due to unification problems its not really possible
+-- (applying buildMorph g1 g2, then buildMorph g2 g1 is not good for ghc)
+proof2 = eqQRankKEPfrag k gm1 gm2 g1 g2
+    where gm1 = buildMorphFromStrat linStrategy k g1 g2
+          gm2 = buildMorphFromStrat linStrategy k g2 g1
+          k = 2
+          g1 = linToGraph [1..4]
+          g2 = linToGraph [5..8]
 
-lin6 = linToGraph [1..4]
-lin7 = linToGraph [5..8]
-res2 = checkEFkMorph 2 lin6 lin7
 
-res3 = checkMorphIsHomo (graphToEFk 2 lin4) lin5 (buildLinMorph 2 lin4 lin5)
-res4 = checkMorphIsHomo (graphToEFk 4 lin1) lin2 (buildLinMorph 4 lin1 lin2)
+proof3 = eqQRankKEPfrag k gm1 gm2 g1 g2
+    where gm1 = buildMorphFromStrat linStrategy k g1 g2
+          gm2 = buildMorphFromStrat linStrategy k g2 g1
+          k = 3
+          g1 = linToGraph [1..9]
+          g2 = linToGraph [4..12]
+
+-- Takes ages
+proof4 = eqQRankKEPfrag k gm1 gm2 g1 g2
+    where gm1 = buildMorphFromStrat linStrategy k g1 g2
+          gm2 = buildMorphFromStrat linStrategy k g2 g1
+          k = 4
+          g1 = linToGraph [1..17]
+          g2 = linToGraph [3..22]
 
 ------------------ Two colourability/Even/Connectivity  -------------------- 
--- Does this need to be the symetric closure of the graphs?
+-- We can get two undriected graphs, one thats a cycle of size (2^k)+1, and one thats made up of two cycles, both of size 2^k
+-- Then for the k round EF game they are equal. Since the single cycle graph is 2 colourable, odd and connected and the two cycle
+-- graph is even, unconnected and not 2-colourable showing that they're equal with eqQRankKEPfrag k constitues a proof that they're 
+-- equal in the equivilent logic.
+ 
+-- Function to generate the two graphs
 generateCycleG :: Int -> (AdjacencyMap Int, AdjacencyMap Int)
 generateCycleG k = (symmetricClosure (AdjMap.circuit [1..2^k+1]),
                     symmetricClosure (AdjMap.overlay (AdjMap.circuit [1..2^k]) (AdjMap.circuit [2^k+1..2^(k+1)])))
@@ -221,7 +244,7 @@ findEqualPlacing n g1 g2 spoil dup = if incomparableS then Nothing
           incomparableS  = foldr (\x xs -> (x==Nothing) && xs) True (Map.elems spoilDists)
           g1Vlist      = vertexList g2
 
-
+-- Get all nodes i away from n on a cycle graph
 getIAway :: (Eq a, Ord a) => a -> Int -> AdjacencyMap a -> [a]
 getIAway n i g = nub (f 0 [] [n])
     where f d visited []        = []
@@ -231,6 +254,7 @@ getIAway n i g = nub (f 0 [] [n])
                 where newN = concatMap (\x -> removeL newV (fromJust (Map.lookup x adjMap))) nodes
                       newV  = visited ++ nodes
           adjMap = Map.fromList (adjacencyList g )
+          
 -- Given a node and a graph find the distance from it to each other node in spoil (Nothing if infinite)
 -- Only works graphs that are a collection of cycles
 -- Dists should be a map
@@ -245,41 +269,37 @@ getCycDistances n g spoil = foldr (\x xs-> Map.insert x (Map.lookup x listOfDist
           adjMap = Map.fromList (adjacencyList g)
 
 
-buildCycleMorph :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord a, Ord (Vertex a), Ord (Vertex b))
-                => Int -> a -> b -> CoKleisli EF GraphMorphism a b
-buildCycleMorph k glin1 glin2 = CoKleisli $ GM (last Prelude.. cycStrategy k glin1 glin2)
+-- getEFkMorphCyc :: (Show a, Show b, Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
+-- getEFkMorphCyc k glin1 glin2 = apply (buildMorphFromStrat cycStrategy k glin1 glin2) eflin1
+--      where eflin1 = graphToEFk k glin1
 
 
-
-
-getEFkMorphCyc :: (Show a, Show b, Ord a, Ord b) => Int -> AdjacencyMap a -> AdjacencyMap b -> AdjacencyMap b
-getEFkMorphCyc k glin1 glin2 = apply (buildMorphFromStrat cycStrategy k glin1 glin2) eflin1
-     where eflin1 = graphToEFk k glin1
-
-k = 3
-(g1,g2) = generateCycleG k
-
-res7 = getEFkMorphCyc k g1 g2
+-- res7 = getEFkMorphCyc k g1 g2
 
 -- res8 = checkMorphIsHomo (graphToEFk k g1) g2 (buildCycleMorph k g1 g2)
 
--- Playing on big
-res9 l = cycStrategy k g1 g2 l
-
--- Playing on 2 small
-res10 l = cycStrategy k g2 g1 l
 -- res11 :: EF (AdjacencyMap Int)
 -- res11 = apply (GM ( k g1 g2)) (graphToEFk k g1)
-res12 = graphToEFk k g1
--- res13 = checkMorphIsHomoDebug (graphToEFk k g1) g2 (buildCycleMorph k g1 g2)
-proof2 = eqQRankKEPfrag k (buildCycleMorph k g1 g2) (buildCycleMorph k g2 g1) g1 g2
+res13 = checkMorphIsHomoDebug (graphToEFk k g1) g2 gm
+    where (g2,g1) = generateCycleG k
+          k = 5
+          (CoKleisli gm) = buildMorphFromStrat cycStrategy k g1 g2
+
+-- Takes ages if k is 4, fine for 2 and 3
+proof5 = eqQRankKEPfrag k gm1 gm2 g1 g2
+    where gm1 = buildMorphFromStrat cycStrategy k g1 g2
+          gm2 = buildMorphFromStrat cycStrategy k g2 g1
+          (g1,g2) = generateCycleG k
+          k = 3
+        
+
+------------------ Cycle and line graph (tree is not expressable) ------------------
+
 
 ------------------ Hamiltonian --------------------
 
 -- This will constitue a proof that a hamiltonian graph is not axiomatisable with a finite number 
 -- of variables in FO logic, i.e. ∀k ∃A,B ∀p (A∈S ∧ B not in S ∧ A ≡kp B)
-
--- I need to give the two graphs, then give the duplicators strategy
 
 -- Two graphs, the first has a hamiltonian cycle, the second does not
 generateHamiltonianG :: Int -> (AdjacencyMap Int, AdjacencyMap Int)
@@ -416,18 +436,21 @@ testCoalgForest g = coalgToForest (forestToCoalg gg) g == gg
 getTreeDepthOfDecomp :: [Tree a] -> Int
 getTreeDepthOfDecomp f = maximum (map (foldTree (\_ xs -> if null xs then 1 else 1 + maximum xs)) f)
 
+
 res5 g = checkValidEFkGraph (getTreeDepthOfDecomp gg) g (gmap f g)
     where gg = gaifmanTDD (getGaifmanGraph g)
           (GM f) = forestToCoalg gg
 
-
+-- Gets tree decomposition then uses the coalgebra version of it as a graph morphism on g
 res6 g = gmap f g
     where gg = gaifmanTDD (getGaifmanGraph g)
           (GM f) = forestToCoalg gg
 
+-- Shows two graphs before and after overlay
 showMerge t1 t2 = printGraphs $ [res6 t1, res6 t2, res6 o]
     where o = AdjMap.overlay t1 t2
 
+-- Not acctually random
 randomGraph :: (RandomGen g) => g -> Int -> AdjacencyMap Int
 randomGraph g n = fromAdjacencySets $ f verts nums
     where nums :: [Int]
@@ -437,7 +460,6 @@ randomGraph g n = fromAdjacencySets $ f verts nums
           f (v:vs) r = (v, Set.fromList [y|(x,y)<- zip rands verts, x==1]) : (f vs newr)
                 where (rands,newr) = splitAt n r
 
--- Not acctually random
 randomGraphList size num = map (\x -> randomGraph (mkStdGen x) size) [1..num]
 
 

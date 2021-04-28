@@ -35,6 +35,7 @@ class (Category dom1, Category dom2, Category cod)
    Object cod (f a c), Object cod (f b d))
    => dom1 a b -> dom2 c d -> cod (f a c) (f b d)
 
+-- Definition of a comonad in coKleislie form
 class (Category cat) => CComonad f cat where
   counit :: (Object cat a
     , Object cat (f a))
@@ -67,6 +68,17 @@ instance Category (CoKleisli f cat) where
   id = CoKleisli counit
   (CoKleisli f) . (CoKleisli g) = CoKleisli (f . extend g)
 
+-- -- Neets to respect algebra morphism rules
+-- data EM f cat a b where
+--   EM :: (Category cat, CComonad f cat) => cat a b -> EM f cat a b
+
+-- class (Category cat, CComonad f cat, Object cat a) => Coalgebra cat f a where
+--   action :: cat a (f a)
+
+-- instance Category (EM f cat) where
+--   type Object (CoKleisli f cat) a = (Category cat, CComonad f cat, Object cat a, Object cat (f a))
+--   id = CoKleisli counit
+--   (CoKleisli f) . (CoKleisli g) = CoKleisli (f . extend g)
 -- I dont think giving the eilenberg moore category is possible in Haskell (with this cate defn), the 
 -- objects would have to be functions, not sure how I could enforece this with a constraint. 
 -- ConstraintKinds gives constraints kinds rather than leting kinds be constraints :(

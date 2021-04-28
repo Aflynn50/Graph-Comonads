@@ -46,13 +46,15 @@ import Category
 
 ----------- The category of graphs -----------
 
+-- Pre: Any graph that implements Graph must merge vertecies of the same value.
+
 -- Morphisms in the categroy of Graphs
 
 -- Ideally these would be graph homomorphims, however, implementing type level graph homomorphisms in haskell
 -- is not easy (or maybe not even possible). It would be easy enough to represent them as a pair of graphs and
 -- a mapping between them the could easily be checked however in that case the two graphs would have to be known
 -- when constructing the morphism.
--- Instead, I have chosen to represent them as vertex maps. A graph morphism can be used to generate the graph of 
+-- Instead, I have chosen to represen   t them as vertex maps. A graph morphism can be used to generate the graph of 
 -- codomain by applying the map to all vertices of the graph and preserving the edge structure. This is 
 -- nececerraly a subset of graph homomorpisms. Graphs are respresented as adjacency maps from the Algebraic graphs 
 -- library, these merge vertices with the same value, so the number of edges of the codomain graph is less than 
@@ -112,10 +114,17 @@ instance (Graph a, Ord a, Ord (Vertex a)) => GraphCoerce (EF a) where
     gcoerce (EFdata g) = g
     gcoerceRev g       = EFdata g 
 
+-- inits for non-empty lists
+-- inits [1,2,3] = [[1],[1,2],[1,2,3]]
+ninits :: [a] -> [[a]]
+ninits [] = []
+ninits xs = ninits (init xs) ++ [xs]
+
 instance CComonad EF GraphMorphism where
     counit          = GM last -- the universe of EF is none empty lists so this is ok
-    extend (GM f)   = GM $ map f Prelude.. (tail Prelude.. inits) 
+    extend (GM f)   = GM $ map f Prelude.. ninits
 
+          
 -- We automatically get the definition of the EF functor from the defn in Category.hs
 
 deriving instance (Graph a, Ord a, Show a, Ord (Vertex a), Show (Vertex a)) => Show (EF a)    
@@ -138,7 +147,7 @@ instance (Graph a, Ord a, Ord (Vertex a)) => GraphCoerce (Pebble a) where
 
 instance CComonad Pebble GraphMorphism where
     counit          = GM $ snd Prelude.. last -- the universe of Pebbles is none empty lists so this is ok
-    extend (GM f)   = GM $ map (\xs -> (fst (last xs),f xs)) Prelude.. (tail Prelude.. inits)
+    extend (GM f)   = GM $ map (\xs -> (fst (last xs),f xs)) Prelude.. ninits
 
 ------ Useful functors ------
 
@@ -195,13 +204,13 @@ coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 -- that were preserved by the homomorpism. We have no reasonable way of getting the action of the morpisms elements in the 
 -- universe that are not in edges without enumerating the type so its not really feasable to get the true equiliser
 getEqualizer :: (GraphCoerce a, GraphCoerce b, Ord (Vertex a), Eq (Vertex a), Eq (Vertex b)) =>    
-        a -> b -> GraphMorphism a b -> GraphMorphism a b -> (a, GraphMorphism a a)
-getEqualizer g1 g2 (GM gm1) (GM gm2) = (gcoerceRev (AdjMap.edges keptE), GM Prelude.id)
+        a -> b -> GraphMorphism a b -> GraphMorphism a b -> a
+getEqualizer g1 g2 (GM gm1) (GM gm2) = gcoerceRev (AdjMap.edges keptE)
     where vinE      = nub (concatMap (\(x,y) -> [x,y]) (edgeList adjg1))
           keptV     = map fst (intersect (map (\x -> (x,gm1 x)) vinE) (map (\x -> (x,gm2 x)) vinE))
           keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList adjg1)
           adjg1     = gcoerce g1
-
+        
 
 
 -- getCoequalizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
@@ -241,19 +250,23 @@ plays k uni
               f i xs = nub $ concatMap (\x -> concatMap (allinserts x) pf) uni
                         where pf = (f (i-1) xs)
 
+-- Gives all different ways x can be inserted into ys 
+allinserts :: t -> [t] -> [[t]]
 allinserts x []     = [[x]]
 allinserts x (y:ys) = (x:y:ys) : map (y:) (allinserts x ys)
 
+-- Get all length k lists that can be made from elements of xs (does not preserve order)
 lengthksublists :: [a] -> Int -> [[a]]
 lengthksublists xs 0 = [[]]
 lengthksublists xs k = concatMap f (elemPairs xs)
     where f (x,ys) = map (x:) (lengthksublists ys (k-1))
 
+--elemPairs [1,2,3] = [(1,[2,3]),(2,[1,3]),(3,[1,2])]
 elemPairs :: [a] -> [(a, [a])]
 elemPairs []     = []
 elemPairs (x:xs) = (x,xs) : (map (\(y,ys) -> (y,x:ys)) (elemPairs xs))
 
--- Performs the action of the EFk functor
+-- The action of the natural transformation from ID to EFk
 graphToEFk :: (GraphCoerce a, Eq (Vertex a), Ord (Vertex a)) => Int -> a -> EF a
 graphToEFk k g = EFdata $ AdjMap.edges $
     concatMap (\p -> mapMaybe (\e -> f e p) edgesOfg) ps
@@ -310,15 +323,16 @@ checkValidPebkGraph k g pebg = foldr f True (edgeList (gcoerce pebg))
                         where lastx     = fst (last xs')
 
 -- Given a duplicator strategy builds the graph morphism f: EFk(A) -> B
-buildMorphFromStrat :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b, Ord a, Ord (Vertex a), Ord (Vertex b),
-                        Eq (Vertex a), Eq (Vertex b)) => (Int -> a -> b -> [Vertex a] -> [Vertex b])
-                        -> Int -> a -> b -> GraphMorphism (EF a) b
-buildMorphFromStrat strat k glin1 glin2 = GM (last Prelude.. strat k glin1 glin2)
+buildMorphFromStrat :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b,
+                        Ord a, Ord (Vertex a), Ord (Vertex b), Eq (Vertex a), Eq (Vertex b)) =>
+                        (Int -> a -> b -> [Vertex a] -> [Vertex b]) -> Int -> a -> b ->
+                        CoKleisli EF GraphMorphism a b
+buildMorphFromStrat strat k glin1 glin2 = CoKleisli $ GM (last Prelude.. strat k glin1 glin2)
 
 
 ---------- Proof checkers ----------
 
--- Checks for equailty in the exisential positvie fragment with quantifier rank k (i.e. checks for isomorphism)
+-- Checks for equailty in the exisential positvie fragment with quantifier rank k
 eqQRankKEPfrag :: (Eq a, Eq b, Ord a, Ord b, Ord (Vertex a), Ord (Vertex b), GraphCoerce a, GraphCoerce b) 
                     => Int -> CoKleisli EF GraphMorphism a b -> CoKleisli EF GraphMorphism b a -> a -> b -> Bool
 eqQRankKEPfrag k (CoKleisli h1) (CoKleisli h2) g1 g2 = 
