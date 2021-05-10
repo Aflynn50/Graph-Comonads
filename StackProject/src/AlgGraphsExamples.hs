@@ -34,27 +34,41 @@ import DrawGraphs
 ------------------ Proof of concept example with two equivilent graphs  -------------------- 
 -- With EF comonad I can only prove them equivilent in fragment of logic with quantifier rank k.
 -- To do this we give a coklislie morphism that takes the EK graph with play length k to graph b
-graph1 :: AdjacencyMap Int
-graph1 = AdjMap.edges [(1,2),(2,3)]
 
-graph2 :: AdjacencyMap Char
-graph2 = AdjMap.edges [('a','b'),('b','c')]
+-- Not acctually random, but generates arbitrary graphs given a seed
+randomGraph :: Int -> Int -> AdjacencyMap Int
+randomGraph seed n = fromAdjacencySets $ f verts nums
+    where nums :: [Int]
+          nums       = take (n*n) (randomRs (1, 2) (mkStdGen seed))
+          verts      = [1..n]
+          f [] r     = []
+          f (v:vs) r = (v, Set.fromList [y |(x,y)<- zip rands verts, x==1]) : (f vs newr)
+                        where (rands,newr) = splitAt n r
 
-liftIsoToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> GraphMorphism (EF a) b
-liftIsoToEFMorph f = GM f Category.. counit
+-- randomGraphList size num = map (\x -> randomGraph (mkStdGen x) size) [1..num]
 
-g1tog2 = CoKleisli $ liftIsoToEFMorph f 
-  where f 1 = 'a'
-        f 2 = 'b'
-        f 3 = 'c'
+liftMapToEFMorph ::(Graph a, Graph b, Ord (Vertex a), Ord a) => (Vertex a -> Vertex b) -> CoKleisli EF GraphMorphism a b
+liftMapToEFMorph f = CoKleisli $ GM f Category.. counit
 
-g2tog1 = CoKleisli $ liftIsoToEFMorph f 
-  where f 'a' = 1
-        f 'b' = 2
-        f 'c' = 3 
+-- Proof that two isomorphic graphs are equal in the fragment quantifier rank k with counting quantifiers
+-- Provide any valid iso (A->B, B->A)
+proof1 :: Int -> Int -> Int -> (Int -> Int, Int -> Int) -> Bool
+proof1 seed size k iso = eqQRankKCounting k g1tog2 g2tog1 graph1 graph2
+    where graph1 = randomGraph seed size
+          graph2 = gmap (fst iso) graph1
+          g1tog2 = liftMapToEFMorph (fst iso)
+          g2tog1 = liftMapToEFMorph (snd iso)
 
-proof1 = eqQRankKCounting 4 g1tog2 g2tog1 graph1 graph2
+ex1 = proof1 45 3 4 ((\x -> x*2), (\x -> x `div` 2))
 
+-- Proof that two isomorphic graphs are equal in the exisential positvie fragment with quantifier rank k
+proof2 seed size k iso = eqQRankKEPfrag k g1tog2 g2tog1 graph1 graph2
+    where graph1 = randomGraph seed size
+          graph2 = gmap (fst iso) graph1
+          g1tog2 = liftMapToEFMorph (fst iso)
+          g2tog1 = liftMapToEFMorph (snd iso)
+
+ex2 = proof2 45 3 4 ((\x -> x*2), (\x -> x `div` 2))
 ------------------ Example with linear orderings  --------------------
 -- Given a list representing a linear ordering it returns the equivilent
 -- graph with the edge relation interpreted as the < relation
@@ -69,7 +83,7 @@ count x = foldr (\y xs-> if x==y then xs + 1 else xs) 0
 
 -- converts a graph to a linear order
 -- Pre: Graph is a representation of a lin order
-graphToLin :: (Graph a, GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
+graphToLin :: (GraphCoerce a, Eq (Vertex a)) => a -> [Vertex a]
 graphToLin g = reverse $ map fst $ sortBy (\(_,a) (_,b) -> compare a b) $ map (\x -> (x,count x e)) (gvertices g)
     where e = map fst (edgeList (gcoerce g))
 
@@ -156,20 +170,14 @@ lemma k (lin11,lin12) (lin21,lin22) ps iso = nub $ linRec k lin11 lin21 p1 iso +
 
 -- Would be good to abstract this to some "checkStrat" function but due to unification problems its not really possible
 -- (applying buildMorph g1 g2, then buildMorph g2 g1 is not good for ghc)
-proof2 = eqQRankKEPfrag k gm1 gm2 g1 g2
+
+-- Pre: the two linear orders are at least lenght 2^k
+proof3 k lin1 lin2 = eqQRankKEPfrag k gm1 gm2 g1 g2
     where gm1 = buildMorphFromStrat linStrategy k g1 g2
           gm2 = buildMorphFromStrat linStrategy k g2 g1
-          k = 2
-          g1 = linToGraph [1..4]
-          g2 = linToGraph [5..8]
+          g1 = linToGraph lin1
+          g2 = linToGraph lin2
 
-
-proof3 = eqQRankKEPfrag k gm1 gm2 g1 g2
-    where gm1 = buildMorphFromStrat linStrategy k g1 g2
-          gm2 = buildMorphFromStrat linStrategy k g2 g1
-          k = 3
-          g1 = linToGraph [1..9]
-          g2 = linToGraph [4..12]
 
 -- Takes ages
 proof4 = eqQRankKEPfrag k gm1 gm2 g1 g2
@@ -190,7 +198,7 @@ generateCycleG :: Int -> (AdjacencyMap Int, AdjacencyMap Int)
 generateCycleG k = (symmetricClosure (AdjMap.circuit [1..2^k+1]),
                     symmetricClosure (AdjMap.overlay (AdjMap.circuit [1..2^k]) (AdjMap.circuit [2^k+1..2^(k+1)])))
 
--- Duplicators strategy is to ensure that the distance between any two of her pebbles is either the equal to the
+-- Duplicators strategy is to ensure that the distance between any two of her pebbles is either equal to the
 -- distance between the corrosponding pair of the spoilers pebbles, or, it is greater than 2^k-r. If the two spoilers
 -- pebbels are on the same graph then it needs to be equal, otherwise greater than 2^k
 -- Spoil plays in g1
@@ -286,12 +294,11 @@ res13 = checkMorphIsHomoDebug (graphToEFk k g1) g2 gm
           (CoKleisli gm) = buildMorphFromStrat cycStrategy k g1 g2
 
 -- Takes ages if k is 4, fine for 2 and 3
-proof5 = eqQRankKEPfrag k gm1 gm2 g1 g2
+proof5 k = eqQRankKEPfrag k gm1 gm2 g1 g2
     where gm1 = buildMorphFromStrat cycStrategy k g1 g2
           gm2 = buildMorphFromStrat cycStrategy k g2 g1
           (g1,g2) = generateCycleG k
-          k = 3
-        
+
 
 ------------------ Cycle and line graph (tree is not expressable) ------------------
 
@@ -309,8 +316,6 @@ generateHamiltonianG k = (symmetricClosure (AdjMap.biclique [1..k] [k+1..2*k]),
 -- Strategy is to pick any elem on the same side not already in iso, since there are always k or more on each side
 -- and the nodes on a given side are indistingushable this is a winning strategy.
 -- Only works on hamitolians generated with generateHamiltonianG
-
--- I need to work out if I can use places that used to have a pebble on, I think I can?
 
 --Basically choose an unused elem in the same side of the graph
 hamStrategy :: Int -> [(Int,Int)] -> [(Int,Int)]
@@ -339,6 +344,16 @@ hamStratRec k ((pi,n):xs) revdup
     | n <= k     = hamStratRec k xs ((pi,unusedKLT k revdup):revdup)
     | otherwise  = hamStratRec k xs ((pi,unusedKGT k revdup):revdup)
 
+
+-- Haskell needs the type of counit explicitally to work out which comonad it should use the counit for
+hamMorphs :: (Graph b, Graph a, Vertex a ~ Int, Vertex b ~ Int, Ord a, Ord b) =>
+    Int -> (CoKleisli Pebble GraphMorphism a b,
+            CoKleisli Pebble GraphMorphism b a)
+hamMorphs k = (CoKleisli $ f Category.. GM (hamStrategy k),
+               CoKleisli $ f Category.. GM (hamStrategy k))
+    where f :: (Graph g, Ord g, Ord (Vertex g)) => GraphMorphism (Pebble g) g 
+          f = counit
+
 ------------------ Tree depth experiments  -------------------- 
 
 data Gaifman a where Gaifman :: (Graph a, Ord a, Ord (Vertex a)) => AdjacencyMap (Vertex a) -> Gaifman a
@@ -347,8 +362,8 @@ data Gaifman a where Gaifman :: (Graph a, Ord a, Ord (Vertex a)) => AdjacencyMap
 -- Technically I think the Gaifman graph should include all elems of the universe, i.e. the type but this
 -- would not be practical
 getGaifmanGraph :: Ord a => AdjacencyMap a -> Gaifman (AdjacencyMap a)
-getGaifmanGraph g = Gaifman $ AdjMap.edges (nub (concat [[(v1,v2),(v2,v1)] |(v1,v2) <- (edgeList g), v1 /= v2]))
-
+getGaifmanGraph g = Gaifman $ AdjMap.edges (nub (concat newedges))
+    where newedges = [[(v1,v2),(v2,v1)] |(v1,v2) <- (edgeList g), v1 /= v2]
 -- Get connected componants of a Gaifman graph
 getCC :: Gaifman (AdjacencyMap a) -> [Gaifman (AdjacencyMap a)]
 getCC (Gaifman g) = map (Gaifman Prelude.. NonEmptyAdjMap.fromNonEmpty) $ vertexList $ scc g
@@ -360,8 +375,8 @@ getCC (Gaifman g) = map (Gaifman Prelude.. NonEmptyAdjMap.fromNonEmpty) $ vertex
 -- of gg.
 -- A treedepth decomposition of a connected graph G=(V,E) is a rooted tree T=(V,ET) that
 -- can be obtained in the following recursive procedure. If G has one vertex, then T=G.
--- Otherwise pick a vertex v∈V as the root of T, build a treedepth decomposition of each
--- connected component of G−v and add each of these decompositions to T by making its root
+-- Otherwise pick a vertex v in V as the root of T, build a treedepth decomposition of each
+-- connected component of G-v and add each of these decompositions to T by making its root
 -- adjacent to v
 gaifmanTDD :: Gaifman (AdjacencyMap a) -> [Tree a]
 gaifmanTDD gg = map f (getCC gg)
@@ -384,6 +399,7 @@ forestToCoalg forest = (GM f)
     where f a = head $ mapMaybe (findNodePreds a) forest
 
 -- Pre: The node a occurs only once in the tree
+-- Find the predecsors of a node
 findNodePreds :: Eq a => a -> Tree a -> Maybe [a]
 findNodePreds a t
     | rootLabel t == a  = Just [a]
@@ -393,8 +409,8 @@ findNodePreds a t
 
 -- We also need the domain graph of the coalg to work out which elems of the universe are in edges so we can
 -- apply the coalg to them to get the forest
-coalgToForest :: (Eq a, Ord a) => GraphMorphism (AdjacencyMap a) (EF (AdjacencyMap a)) -> (AdjacencyMap a) -> Forest a
-coalgToForest (GM f) g = foldr addToForest [] (foldr h [] (vertexList g))
+coalgToForest :: (GraphCoerce a, Eq (Vertex a), Ord (Vertex a)) => GraphMorphism a (EF a) -> a -> Forest (Vertex a)
+coalgToForest (GM f) g = foldr addToForest [] (foldr h [] (vertexList (gcoerce g)))
     where h a l = updateList (f a) l
           updateList as []     = [as]
           updateList as (xs:xss)
@@ -436,6 +452,25 @@ testCoalgForest g = coalgToForest (forestToCoalg gg) g == gg
 getTreeDepthOfDecomp :: [Tree a] -> Int
 getTreeDepthOfDecomp f = maximum (map (foldTree (\_ xs -> if null xs then 1 else 1 + maximum xs)) f)
 
+-- Checks if a graph and its assosiated object form a valid EFk coalgebra 
+checkValidCoalg :: (GraphCoerce a, Eq (Vertex a), Ord (Vertex a)) => GraphMorphism a (EF a) -> a -> Bool
+checkValidCoalg gm g = checkValidTDD g (coalgToForest gm g)
+
+-- Checks if a forest is a valid forest
+checkValidTDD :: (GraphCoerce a, Eq (Vertex a), Ord (Vertex a)) => a -> Forest (Vertex a) -> Bool
+checkValidTDD g forest = foldr (\(x,y) xs -> xs && or (map (checkAorD x y) forest)) True es
+    where es = edgeList (gcoerce g)
+        
+-- returns true if x is a decendent or ancestor of y
+checkAorD :: (Eq a) => a -> a -> Tree a -> Bool
+checkAorD x y (Node l ts) 
+    | x == l    = foldr (\z zs -> checkD y z || zs) False ts
+    | y == l    = foldr (\z zs -> checkD x z || zs) False ts
+    | otherwise = foldr (\z zs -> checkAorD x y z || zs) False ts
+
+-- returns true if x is in the tree
+checkD :: (Eq a) => a -> Tree a -> Bool
+checkD x t = foldTree (\y ys -> if y == x then True else or ys) t
 
 res5 g = checkValidEFkGraph (getTreeDepthOfDecomp gg) g (gmap f g)
     where gg = gaifmanTDD (getGaifmanGraph g)
@@ -449,18 +484,6 @@ res6 g = gmap f g
 -- Shows two graphs before and after overlay
 showMerge t1 t2 = printGraphs $ [res6 t1, res6 t2, res6 o]
     where o = AdjMap.overlay t1 t2
-
--- Not acctually random
-randomGraph :: (RandomGen g) => g -> Int -> AdjacencyMap Int
-randomGraph g n = fromAdjacencySets $ f verts nums
-    where nums :: [Int]
-          nums       = take (n*n) (randomRs (1, 2) g)
-          verts      = [1..n]
-          f [] r     = []
-          f (v:vs) r = (v, Set.fromList [y|(x,y)<- zip rands verts, x==1]) : (f vs newr)
-                where (rands,newr) = splitAt n r
-
-randomGraphList size num = map (\x -> randomGraph (mkStdGen x) size) [1..num]
 
 
 test1 = linToGraph [1..4]

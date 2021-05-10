@@ -99,12 +99,15 @@ instance Ord a => GraphCoerce (AdjacencyMap a) where
 -- data EF a where EFdata :: (Graph a, Graph b, Vertex b ~ [Vertex a], GraphCoerce b) => b -> EF a
 
 ------ The Ehrenfeucht-Fraı̈ssé Comonad ------
--- Should technically be non empty lists rather than just haskell lists
+-- The comonad given here is actually a family of comonads. Each member of the family is assosiated
+-- with an index k. The universe of the k indexed comonad has the invarient:
+-- ∀xs∈ (universe (EF A)). 1 <= length xs <= k.
+-- For convinience we do not explicitally express the k parameter. 
 
 data EF a where EFdata :: (Graph a) => AdjacencyMap [Vertex a] -> EF a
 
 instance (Graph a, Ord a, Ord (Vertex a)) => Graph (EF a) where
-    type Vertex (EF a) = [Vertex a]
+    type Vertex (EF a) = [Vertex a] -- Ideally this would be none empty lists of size k
     empty = EFdata AdjMap.empty
     vertex v = EFdata $ AdjMap.vertex v
     overlay (EFdata g1) (EFdata g2) = EFdata $ AdjMap.overlay g1 g2
@@ -120,8 +123,9 @@ ninits :: [a] -> [[a]]
 ninits [] = []
 ninits xs = ninits (init xs) ++ [xs]
 
+-- ∃k. ∀ Graph A,xs∈(universe (EF A)). 1 <= length xs <= k
 instance CComonad EF GraphMorphism where
-    counit          = GM last -- the universe of EF is none empty lists so this is ok
+    counit          = GM last
     extend (GM f)   = GM $ map f Prelude.. ninits
 
           
@@ -130,7 +134,10 @@ instance CComonad EF GraphMorphism where
 deriving instance (Graph a, Ord a, Show a, Ord (Vertex a), Show (Vertex a)) => Show (EF a)    
 
 ------ The Pebbling Comonad ------
--- Should technically be non empty lists rather than just haskell lists
+-- The comonad given here is actually a family of comonads. Each member of the family is assosiated
+-- with an index k. The universe of the k indexed comonad has the invarient:
+-- ∀xs∈ (universe (Pebble A)). max (peb-index xs) <= k && xs != []
+-- For convinience we do not explicitally express the k parameter. 
 
 data Pebble a where Peb :: (Graph a) => AdjacencyMap [(Int, Vertex a)] -> Pebble a
 
@@ -145,8 +152,9 @@ instance (Graph a, Ord a, Ord (Vertex a)) => GraphCoerce (Pebble a) where
     gcoerce (Peb g) = g
     gcoerceRev g    = Peb g 
 
+-- ∃k. ∀ Graph A, xs∈ (universe (Pebble A)). max (peb-index xs) <= k && xs != []
 instance CComonad Pebble GraphMorphism where
-    counit          = GM $ snd Prelude.. last -- the universe of Pebbles is none empty lists so this is ok
+    counit          = GM $ snd Prelude.. last
     extend (GM f)   = GM $ map (\xs -> (fst (last xs),f xs)) Prelude.. ninits
 
 ------ Useful functors ------
@@ -203,9 +211,9 @@ coproduct g1 g2 = Coprod $ AdjMap.overlay (gmap Left g1) (gmap Right g2)
 -- Not really a true equaliser, for that we would need to introduce a new type, c, that contained only the members of a
 -- that were preserved by the homomorpism. We have no reasonable way of getting the action of the morpisms elements in the 
 -- universe that are not in edges without enumerating the type so its not really feasable to get the true equiliser
-getEqualizer :: (GraphCoerce a, GraphCoerce b, Ord (Vertex a), Eq (Vertex a), Eq (Vertex b)) =>    
+getEqualiser :: (GraphCoerce a, GraphCoerce b, Ord (Vertex a), Eq (Vertex a), Eq (Vertex b)) =>    
         a -> b -> GraphMorphism a b -> GraphMorphism a b -> a
-getEqualizer g1 g2 (GM gm1) (GM gm2) = gcoerceRev (AdjMap.edges keptE)
+getEqualiser g1 g2 (GM gm1) (GM gm2) = gcoerceRev (AdjMap.edges keptE)
     where vinE      = nub (concatMap (\(x,y) -> [x,y]) (edgeList adjg1))
           keptV     = map fst (intersect (map (\x -> (x,gm1 x)) vinE) (map (\x -> (x,gm2 x)) vinE))
           keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList adjg1)
@@ -323,8 +331,8 @@ checkValidPebkGraph k g pebg = foldr f True (edgeList (gcoerce pebg))
                         where lastx     = fst (last xs')
 
 -- Given a duplicator strategy builds the graph morphism f: EFk(A) -> B
-buildMorphFromStrat :: (Show (Vertex a), Show (Vertex b), Graph a, Graph b, GraphCoerce a, GraphCoerce b,
-                        Ord a, Ord (Vertex a), Ord (Vertex b), Eq (Vertex a), Eq (Vertex b)) =>
+buildMorphFromStrat :: (Show (Vertex a), Show (Vertex b), GraphCoerce a, GraphCoerce b, Ord a, Ord (Vertex a),
+                        Ord (Vertex b), Eq (Vertex a), Eq (Vertex b)) =>
                         (Int -> a -> b -> [Vertex a] -> [Vertex b]) -> Int -> a -> b ->
                         CoKleisli EF GraphMorphism a b
 buildMorphFromStrat strat k glin1 glin2 = CoKleisli $ GM (last Prelude.. strat k glin1 glin2)
@@ -332,7 +340,7 @@ buildMorphFromStrat strat k glin1 glin2 = CoKleisli $ GM (last Prelude.. strat k
 
 ---------- Proof checkers ----------
 
--- Checks for equailty in the exisential positvie fragment with quantifier rank k
+-- Checks for equailty in the existential positive fragment with quantifier rank k
 eqQRankKEPfrag :: (Eq a, Eq b, Ord a, Ord b, Ord (Vertex a), Ord (Vertex b), GraphCoerce a, GraphCoerce b) 
                     => Int -> CoKleisli EF GraphMorphism a b -> CoKleisli EF GraphMorphism b a -> a -> b -> Bool
 eqQRankKEPfrag k (CoKleisli h1) (CoKleisli h2) g1 g2 = 
