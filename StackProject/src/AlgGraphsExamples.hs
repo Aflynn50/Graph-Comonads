@@ -178,14 +178,10 @@ proof3 k lin1 lin2 = eqQRankKEPfrag k gm1 gm2 g1 g2
           g1 = linToGraph lin1
           g2 = linToGraph lin2
 
-
+ex3 = proof3 2 [1..5] [7..11]
+ex4 = proof3 3 [1..9] [10..18]
 -- Takes ages
-proof4 = eqQRankKEPfrag k gm1 gm2 g1 g2
-    where gm1 = buildMorphFromStrat linStrategy k g1 g2
-          gm2 = buildMorphFromStrat linStrategy k g2 g1
-          k = 4
-          g1 = linToGraph [1..17]
-          g2 = linToGraph [3..22]
+ex5 = proof3 4 [1..17] [3..22] 
 
 ------------------ Two colourability/Even/Connectivity  -------------------- 
 -- We can get two undriected graphs, one thats a cycle of size (2^k)+1, and one thats made up of two cycles, both of size 2^k
@@ -471,22 +467,3 @@ checkAorD x y (Node l ts)
 -- returns true if x is in the tree
 checkD :: (Eq a) => a -> Tree a -> Bool
 checkD x t = foldTree (\y ys -> if y == x then True else or ys) t
-
-res5 g = checkValidEFkGraph (getTreeDepthOfDecomp gg) g (gmap f g)
-    where gg = gaifmanTDD (getGaifmanGraph g)
-          (GM f) = forestToCoalg gg
-
--- Gets tree decomposition then uses the coalgebra version of it as a graph morphism on g
-res6 g = gmap f g
-    where gg = gaifmanTDD (getGaifmanGraph g)
-          (GM f) = forestToCoalg gg
-
--- Shows two graphs before and after overlay
-showMerge t1 t2 = printGraphs $ [res6 t1, res6 t2, res6 o]
-    where o = AdjMap.overlay t1 t2
-
-
-test1 = linToGraph [1..4]
-test2 = linToGraph [4,5,6,1]
-o t1 t2 = AdjMap.overlay (linToGraph t1) (linToGraph t2)
-gg o = gaifmanTDD (getGaifmanGraph $ o)

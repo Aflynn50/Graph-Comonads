@@ -218,11 +218,6 @@ getEqualiser g1 g2 (GM gm1) (GM gm2) = gcoerceRev (AdjMap.edges keptE)
           keptV     = map fst (intersect (map (\x -> (x,gm1 x)) vinE) (map (\x -> (x,gm2 x)) vinE))
           keptE     = filter (\(x,y)-> elem x keptV && elem y keptV) (edgeList adjg1)
           adjg1     = gcoerce g1
-        
-
-
--- getCoequalizer :: (Graph c, Graph d, Vertex c ~ a, Vertex d ~ b, Ord a, Eq a, Eq b) =>    
---         AdjacencyMap a -> AdjacencyMap b -> GraphMorphism c d -> GraphMorphism c d -> (AdjacencyMap a, GraphMorphism c c)
 
 ------ Useful functions ------
 

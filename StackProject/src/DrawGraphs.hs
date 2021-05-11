@@ -13,14 +13,19 @@ import Data.GraphViz
 
 graphVizParams = nonClusteredParams
 
-graphToDot :: (Ord a, Show a) => AdjacencyMap a -> DotGraph a
-graphToDot g = graphElemsToDot graphVizParams (map (\x -> (x,show x)) vs) (map (\(x,y)->(x,y,"")) es)
+-- graphToDot :: (Ord a, Show a) => AdjacencyMap a -> DotGraph a
+-- graphToDot g = graphElemsToDot graphVizParams (map (\x -> (x,show x)) vs) (map (\(x,y)->(x,y,"")) es)
+--     where vs = vertexList g
+--           es = edgeList g
+
+graphToDot :: (Ord a, Show a) => AdjacencyMap a -> DotGraph String
+graphToDot g = graphElemsToDot graphVizParams (map (\x -> (show x,show x)) vs) (map (\(x,y)->(show x,show y,"")) es)
     where vs = vertexList g
           es = edgeList g
 
 -- Use the graphviz visual studio extention with the preview to see graph
 -- Open graph.dot, Ctrl+p, type '>' and select Graphviz interactive preview
-printGraph :: (PrintDot a, Ord a, Show a) => AdjacencyMap a -> IO String
+printGraph :: (Ord a, Show a) => AdjacencyMap a -> IO String
 printGraph g = runGraphviz (graphToDot g) DotOutput "./graph.dot"
 
 printGraphs :: (Ord a, Show a) => [AdjacencyMap a] -> IO String
